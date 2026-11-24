@@ -3,7 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'data/bridge_client.dart';
-import 'screens/week_screen.dart';
+import 'screens/home_shell.dart';
 
 void main() => runApp(const ProviderScope(child: WeeklyBudgetApp()));
 
@@ -54,7 +54,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
       setState(() => _status = 'Connected (Actual client $v)');
       if (!mounted) return;
       Navigator.of(context).pushReplacement(MaterialPageRoute(
-          builder: (_) => WeekScreen(client: BridgeClient(baseUrl: _url.text.trim(), token: _token.text.trim()))));
+          builder: (_) => HomeShell(client: BridgeClient(baseUrl: _url.text.trim(), token: _token.text.trim()))));
     } on BridgeException catch (e) {
       setState(() => _status = e.message);
     }

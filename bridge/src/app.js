@@ -2,6 +2,7 @@ import Fastify from 'fastify';
 import { timingSafeEqual } from 'node:crypto';
 import { weeklyPosition } from './weekly.js';
 import { affordCheck } from './afford.js';
+import { suggestCategory } from './suggest.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -58,6 +59,46 @@ export function buildApp({ token, actual, logger = false }) {
     if (!cat) return reply.code(404).send({ error: 'unknown category' });
     const position = weeklyPosition({ today, balance: cat.balance, spentThisWeek: cat.spentThisWeek });
     return { category: cat.name, ...affordCheck({ amount, position }) };
+  });
+
+  app.get('/categories', async () => ({ categories: await actual.listCategories() }));
+
+  // Uncategorized inbox, newest first, each with an optional suggestion (never auto-applied).
+  app.get('/transactions/uncategorized', async () => {
+    const today = actual.today();
+    const since = `${Number(today.slice(0, 4)) - 1}${today.slice(4)}`;
+    const [txs, history, cats] = await Promise.all([
+      actual.uncategorized(),
+      actual.history(since),
+      actual.listCategories(),
+    ]);
+    const names = new Map(cats.map((c) => [c.id, c.name]));
+    return {
+      transactions: txs.map((t) => {
+        const s = suggestCategory(t.payee, history);
+        const name = s && names.get(s.categoryId);
+        return {
+          ...t,
+          suggestion: name
+            ? {
+                categoryId: s.categoryId,
+                categoryName: name,
+                reason: `${s.count} of ${s.total} past "${t.payee}" charges ${s.match === 'exact' ? '' : '(similar names) '}were ${name}`.replace('  ', ' '),
+              }
+            : null,
+        };
+      }),
+    };
+  });
+
+  app.post('/transactions/:id/category', async (req, reply) => {
+    const { categoryId } = req.body ?? {};
+    const cats = await actual.listCategories();
+    if (!categoryId || !cats.some((c) => c.id === categoryId)) {
+      return reply.code(400).send({ error: 'unknown categoryId' });
+    }
+    await actual.setCategory(req.params.id, categoryId);
+    return { ok: true };
   });
 
   return app;

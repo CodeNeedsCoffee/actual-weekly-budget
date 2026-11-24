@@ -35,6 +35,53 @@ export async function readCategories(client, today) {
   return out;
 }
 
+// Live, selectable categories (expense and income), keyed by id.
+export async function readCategoryList(client) {
+  const groups = await client.getCategoryGroups();
+  return groups
+    .filter((g) => !g.hidden)
+    .flatMap((g) =>
+      g.categories
+        .filter((c) => !c.hidden)
+        .map((c) => ({ id: c.id, name: c.name, group: g.name, isIncome: !!g.is_income })),
+    );
+}
+
+// On-budget, non-transfer, non-split-parent transactions with no category.
+export async function readUncategorized(client) {
+  const { data } = await client.runQuery(
+    client
+      .q('transactions')
+      .filter({
+        category: null,
+        is_parent: false,
+        'account.offbudget': false,
+        'payee.transfer_acct': null,
+      })
+      .select(['id', 'date', 'amount', 'payee.name', 'imported_payee', 'account.name', 'notes'])
+      .orderBy({ date: 'desc' }),
+  );
+  return data.map((t) => ({
+    id: t.id,
+    date: t.date,
+    amount: t.amount,
+    payee: t.imported_payee || t['payee.name'] || '',
+    account: t['account.name'],
+    notes: t.notes ?? '',
+  }));
+}
+
+// Categorized transactions from the last year, used to learn payee -> category.
+export async function readHistory(client, sinceDate) {
+  const { data } = await client.runQuery(
+    client
+      .q('transactions')
+      .filter({ category: { $ne: null }, date: { $gte: sinceDate } })
+      .select(['imported_payee', 'payee.name', 'category']),
+  );
+  return data.map((t) => ({ payee: t.imported_payee || t['payee.name'] || '', categoryId: t.category }));
+}
+
 // Thin adapter over @actual-app/api. The client version must match the server.
 export async function createActual(cfg) {
   await api.init({
@@ -54,6 +101,12 @@ export async function createActual(cfg) {
     },
     today: () => new Date().toISOString().slice(0, 10),
     categories: (today) => readCategories(api, today),
+    listCategories: () => readCategoryList(api),
+    uncategorized: () => readUncategorized(api),
+    history: (since) => readHistory(api, since),
+    setCategory: async (id, categoryId) => {
+      await api.updateTransaction(id, { category: categoryId });
+    },
     close: () => api.shutdown(),
   };
 }

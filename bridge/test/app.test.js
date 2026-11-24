@@ -6,6 +6,19 @@ const fake = {
   clientVersion: () => '0.0.0',
   summary: async () => ({ accounts: 2 }),
   today: () => '2026-11-24',
+  listCategories: async () => [
+    { id: 'c1', name: 'Groceries', group: 'Food', isIncome: false },
+    { id: 'c2', name: 'Shopping', group: 'Misc', isIncome: false },
+  ],
+  uncategorized: async () => [
+    { id: 't1', date: '2026-11-20', amount: -4200, payee: 'SPROUTS #55', account: 'Checking', notes: '' },
+    { id: 't2', date: '2026-11-19', amount: -900, payee: 'Unknown Shop', account: 'Checking', notes: '' },
+  ],
+  history: async () => [
+    { payee: 'Sprouts #1', categoryId: 'c1' },
+    { payee: 'Sprouts #2', categoryId: 'c1' },
+  ],
+  setCategory: async (id, categoryId) => { fake.last = [id, categoryId]; },
   categories: async () => [{ id: 'c1', name: 'Groceries', group: 'Food', balance: 8000, spentThisWeek: 1000 }],
 };
 const app = () => buildApp({ token: 'tok1', actual: fake });
@@ -53,4 +66,20 @@ test('afford answers yes/tight/no and validates input', async () => {
   assert.equal((await post({ amount: 9000, categoryId: 'c1' })).json().verdict, 'no');
   assert.equal((await post({ amount: 1.5, categoryId: 'c1' })).statusCode, 400);
   assert.equal((await post({ amount: 100, categoryId: 'zzz' })).statusCode, 404);
+});
+
+test('uncategorized inbox suggests from history with a reason, and null when unknown', async () => {
+  const res = await app().inject({ method: 'GET', url: '/transactions/uncategorized', headers: auth });
+  const [a, b] = res.json().transactions;
+  assert.equal(a.suggestion.categoryName, 'Groceries');
+  assert.match(a.suggestion.reason, /2 of 2 past "SPROUTS #55" charges were Groceries/);
+  assert.equal(b.suggestion, null);
+});
+
+test('categorizing validates the category and writes it', async () => {
+  const a = app();
+  const post = (body) => a.inject({ method: 'POST', url: '/transactions/t1/category', headers: auth, payload: body });
+  assert.equal((await post({ categoryId: 'nope' })).statusCode, 400);
+  assert.equal((await post({ categoryId: 'c2' })).statusCode, 200);
+  assert.deepEqual(fake.last, ['t1', 'c2']);
 });
