@@ -85,10 +85,7 @@ Look at something this week and understand whether it is within budget to buy. E
 
 ## Operations (not in the app)
 - Done: Tugtainer password set, Actual on the floating `latest` tag (26.11.0) with auto-check, built-in bank sync enabled, API client upgraded, host root disk cleaned.
-- Backups kept for now (delete later when satisfied):
-  - /media/HDD-Storage/Apps/tugtainer/backup-pre-v2/
-  - /media/HDD-Storage/Apps/actualbudget/backup-pre-26.11-<date>/
-  - local backup copies
+- Backups of the server data are kept locally until the owner is satisfied.
 - Optional: Tugtainer notifications.
 
 ## Possible later
