@@ -33,7 +33,7 @@ actual-weekly-budget/
 ```
 
 ## 3. Core logic (defined up front)
-1. **Weekly view.** For a category: `available = balance (incl. carryover)`. Week = Monday to Sunday. `weekly allowance = available / weeks remaining in month` (weeks counted by days/7, current partial week included); show spent this week, remaining this week, and month remaining. Overspent categories show their deficit and the carried negative explicitly. (Assumption, confirm.)
+1. **Weekly view.** For a category: `available = balance (incl. carryover)`. Week = Sunday to Saturday. The week's allowance is the balance at the start of the week spread evenly over the days left in the month, times the days of this week that fall in the month; show spent this week, remaining this week, and month remaining. Overspent categories show their deficit and the carried negative explicitly. (Assumption, confirm.)
 2. **Afford check.** Input amount + category (or suggest a category). Output: fits this week? fits this month? what the category balance becomes, plus a flag if it pushes Checking's 14-day forecast under buffer. Verdicts: Yes / Tight / No with the numbers shown.
 3. **Category suggestions.** From payee history: match on normalized imported payee (strip store numbers, locations, `#1234`, `TST*`, `SQ *`). Suggest the most frequent category with count ("12 of 14 past Sprouts charges were Groceries"); fall back to fuzzy token match. Never auto-apply. Target is split 50/50 Groceries/Household, but the API cannot write splits, so Target goes to Shopping and the app flags it for the Actual UI.
 4. **Refresh imports.** Trigger bank sync (`runBankSync`) through the bridge; show per-account last-synced and stale warnings (> 2 days).
@@ -90,7 +90,7 @@ Each milestone ends with tests green and something usable. Order puts the "can I
 
 ## 8. Open decisions (need your answer before the milestone named)
 1. **Remote access (M0):** LAN-only, or Tailscale for use away from home? (Recommended: Tailscale.)
-2. **Week boundaries (M1):** Monday to Sunday, or Sunday to Saturday? Remaining-weeks method OK as written?
+2. **Week boundaries (M1):** Sunday to Saturday (confirmed). Remaining-weeks method OK as written?
 3. **Platform (M0):** Android only (you install debug APKs now) or iOS too?
 4. **App name/icon (M7):** "Actual Weekly Budget" is the repo; pick a display name later.
 5. **Commits:** I won't commit or push unless you say so.
