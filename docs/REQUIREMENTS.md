@@ -81,7 +81,7 @@ Look at something this week and understand whether it is within budget to buy. E
 - New Apartment rent schedule added (monthly on the 1st, Checking); July-November payments linked.
 - Six stray transfer pairs on Checking removed; real Savings/Checking transfers relinked. Balances unchanged.
 - 70 rules now (keyword rules per category); existing uncategorized transactions categorized directly.
-- Trip charges (Newfoundland/Halifax) and Target put in Shopping; deposits mapped to Shopping (refunds/credits) or Savings (income).
+- Trip charges and Target put in Shopping; deposits mapped to Shopping (refunds/credits) or Savings (income).
 
 ## Operations (not in the app)
 - Done: Tugtainer password set, Actual on the floating `latest` tag (26.11.0) with auto-check, built-in bank sync enabled, API client upgraded, host root disk cleaned.
