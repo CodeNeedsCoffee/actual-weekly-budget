@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'data/bridge_client.dart';
+import 'screens/week_screen.dart';
 
 void main() => runApp(const ProviderScope(child: WeeklyBudgetApp()));
 
@@ -51,6 +52,9 @@ class _ConnectScreenState extends State<ConnectScreen> {
       await _storage.write(key: 'bridge_url', value: _url.text.trim());
       await _storage.write(key: 'bridge_token', value: _token.text.trim());
       setState(() => _status = 'Connected (Actual client $v)');
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(MaterialPageRoute(
+          builder: (_) => WeekScreen(client: BridgeClient(baseUrl: _url.text.trim(), token: _token.text.trim()))));
     } on BridgeException catch (e) {
       setState(() => _status = e.message);
     }
