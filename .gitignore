@@ -1,0 +1,34 @@
+# Secrets and personal data: never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+# Local budget data, fixtures built from real data, backups
+fixtures/private/
+private/
+data/
+*.sqlite
+*.sqlite-*
+*.db
+*.zip
+*backup*
+budget-*.json
+*targets*.json
+# Node
+node_modules/
+bridge/dist/
+# Flutter / Android
+.dart_tool/
+build/
+.flutter-plugins*
+*.iml
+.idea/
+local.properties
+key.properties
+*.jks
+*.keystore
+google-services.json
+# OS
+.DS_Store
