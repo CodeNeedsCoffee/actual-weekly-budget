@@ -1,4 +1,6 @@
 import * as api from '@actual-app/api';
+import apiCjs from '@actual-app/api';
+import { splitActions } from './splits.js';
 import { readFileSync } from 'node:fs';
 import { weekBounds, monthBounds } from './weekly.js';
 
@@ -82,6 +84,21 @@ export async function readHistory(client, sinceDate) {
   return data.map((t) => ({ payee: t.imported_payee || t['payee.name'] || '', categoryId: t.category }));
 }
 
+// Splits an existing transaction by applying rule-style actions directly (no rule is created).
+// Uses the client's internal `rule-apply-actions` handler, which is not a public API, so the
+// bridge pins the client version and this is covered by the live checks in docs/DEV.md.
+export async function splitExisting(client, internal, id, parts) {
+  const { data } = await client.runQuery(
+    client.q('transactions').filter({ id }).select(['*']).options({ splits: 'all' }),
+  );
+  const t = data[0];
+  if (!t) return { error: 'not found' };
+  if (t.is_parent || t.is_child) return { error: 'already split' };
+  const res = await internal.send('rule-apply-actions', { transactions: [t], actions: splitActions(parts) });
+  if (!res || res.errors?.length) return { error: 'split failed' };
+  return { ok: true };
+}
+
 // Thin adapter over @actual-app/api. The client version must match the server.
 export async function createActual(cfg) {
   await api.init({
@@ -107,6 +124,7 @@ export async function createActual(cfg) {
     setCategory: async (id, categoryId) => {
       await api.updateTransaction(id, { category: categoryId });
     },
+    splitTransaction: (id, parts) => splitExisting(api, apiCjs.internal, id, parts),
     close: () => api.shutdown(),
   };
 }

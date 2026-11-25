@@ -57,7 +57,7 @@ All endpoints need `Authorization: Bearer <token>`.
 - `GET /amex/advice`
 - `GET /recovery` (double-rent tracker)
 
-Writes allowed: set category on a transaction, set budget amounts, run bank sync. No deletes, no splits.
+Writes allowed: set category on a transaction, split a transaction (`POST /transactions/:id/split`, via the client's internal `rule-apply-actions`), set budget amounts, run bank sync. No deletes.
 
 ## 5. Milestones
 Each milestone ends with tests green and something usable. Order puts the "can I afford this?" answer first.
@@ -83,7 +83,7 @@ Each milestone ends with tests green and something usable. Order puts the "can I
 ## 7. Risks and decisions already made
 - Client/server version coupling: pin `@actual-app/api` to the server version; bridge startup checks for mismatch and reports it in `/health` (we hit `invalid-schema` on 26.5.2 vs 26.11.0).
 - Tombstoned duplicate categories: always filter deleted and key by ID, never name.
-- API cannot write splits: split-needed transactions are flagged, not written.
+- Splits: the public API cannot write them, but the internal `rule-apply-actions` handler can (no rule needed). Unsupported API surface, so keep the client pinned and keep the live check; fall back to flagging split-needed transactions if it ever breaks.
 - Bank sync is SimpleFIN (beta, 90-day cap); the app must tolerate gaps.
 - Paychecks are unscheduled; forecast treats income as a toggle with a base-pay estimate.
 - No auto-apply: suggestions and balancing moves always need a tap.

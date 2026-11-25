@@ -3,6 +3,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { weeklyPosition } from './weekly.js';
 import { affordCheck } from './afford.js';
 import { suggestCategory } from './suggest.js';
+import { splitActions } from './splits.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -98,6 +99,24 @@ export function buildApp({ token, actual, logger = false }) {
       return reply.code(400).send({ error: 'unknown categoryId' });
     }
     await actual.setCategory(req.params.id, categoryId);
+    return { ok: true };
+  });
+
+  // Body: { parts: [{ categoryId, percent? }] }; one part may omit percent (takes the remainder).
+  app.post('/transactions/:id/split', async (req, reply) => {
+    const parts = req.body?.parts;
+    try {
+      splitActions(parts);
+    } catch (e) {
+      return reply.code(400).send({ error: e.message });
+    }
+    const cats = await actual.listCategories();
+    if (!parts.every((p) => cats.some((c) => c.id === p.categoryId))) {
+      return reply.code(400).send({ error: 'unknown categoryId' });
+    }
+    const res = await actual.splitTransaction(req.params.id, parts);
+    if (res.error === 'not found') return reply.code(404).send(res);
+    if (res.error) return reply.code(409).send(res);
     return { ok: true };
   });
 

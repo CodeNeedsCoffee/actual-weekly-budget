@@ -18,7 +18,7 @@ Look at something this week and understand whether it is within budget to buy. E
 ### 2. Recategorize uncategorized transactions
 - Easy, fast recategorizing of uncategorized transactions (swipe or tap, minimal steps).
 - Show how many are uncategorized.
-- Splits: Target is always split 50/50 Groceries / Household Items.
+- Splits: Target is always split 50/50 Groceries / Household Items. The app applies it with one tap through the bridge split endpoint.
 - Shopping is the catch-all category for now.
 
 ### 3. Category suggestions
@@ -66,7 +66,7 @@ Look at something this week and understand whether it is within budget to buy. E
 - Access to the server is through the `@actual-app/api` Node client (version must match the server, now 26.11.0); the Actual UI balance is authoritative.
 - Bank sync is SimpleFIN (beta bridge); 90-day request cap.
 - Rules cannot be applied retroactively; existing transactions must be updated directly.
-- The API cannot write splits on existing transactions; use the Actual UI.
+- The public API cannot write splits (`updateTransaction` with subtransactions fails). The client's internal `rule-apply-actions` handler can: it applies rule-style actions (`set-split-amount` plus per-split `category`) to existing transactions without creating a rule, and writes real splits. Verified on a local copy (children sum to the parent). It is not a public API, so the client version stays pinned.
 
 ## Open data issues
 - No uncategorized transactions remain (user categorized the rest on 2026-11-23).

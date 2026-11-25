@@ -18,6 +18,7 @@ const fake = {
     { payee: 'Sprouts #1', categoryId: 'c1' },
     { payee: 'Sprouts #2', categoryId: 'c1' },
   ],
+  splitTransaction: async (id, parts) => (id === 'gone' ? { error: 'not found' } : id === 'done' ? { error: 'already split' } : (fake.split = [id, parts], { ok: true })),
   setCategory: async (id, categoryId) => { fake.last = [id, categoryId]; },
   categories: async () => [{ id: 'c1', name: 'Groceries', group: 'Food', balance: 8000, spentThisWeek: 1000 }],
 };
@@ -82,4 +83,16 @@ test('categorizing validates the category and writes it', async () => {
   assert.equal((await post({ categoryId: 'nope' })).statusCode, 400);
   assert.equal((await post({ categoryId: 'c2' })).statusCode, 200);
   assert.deepEqual(fake.last, ['t1', 'c2']);
+});
+
+test('split validates parts and maps adapter errors', async () => {
+  const a = app();
+  const post = (id, body) => a.inject({ method: 'POST', url: `/transactions/${id}/split`, headers: auth, payload: body });
+  const ok = { parts: [{ categoryId: 'c1', percent: 50 }, { categoryId: 'c2' }] };
+  assert.equal((await post('t1', ok)).statusCode, 200);
+  assert.equal(fake.split[0], 't1');
+  assert.equal((await post('t1', { parts: [{ categoryId: 'c1' }] })).statusCode, 400);
+  assert.equal((await post('t1', { parts: [{ categoryId: 'zz', percent: 50 }, { categoryId: 'c2' }] })).statusCode, 400);
+  assert.equal((await post('gone', ok)).statusCode, 404);
+  assert.equal((await post('done', ok)).statusCode, 409);
 });
