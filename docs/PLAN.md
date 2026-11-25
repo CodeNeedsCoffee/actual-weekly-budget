@@ -1,4 +1,4 @@
-# Build Plan: Actual Weekly Budget
+# Build Plan: Weekly Grind (actual-weekly-budget)
 
 Mobile app (Flutter) on top of the self-hosted Actual Budget server. Requirements are in `REQUIREMENTS.md`. Plan written 2026-11-23.
 
@@ -92,7 +92,7 @@ Each milestone ends with tests green and something usable. Order puts the "can I
 1. **Remote access (M0):** LAN-only, or Tailscale for use away from home? (Recommended: Tailscale.)
 2. **Week boundaries (M1):** Sunday to Saturday (confirmed). Remaining-weeks method OK as written?
 3. **Platform (M0):** Android only (you install debug APKs now) or iOS too?
-4. **App name/icon (M7):** "Actual Weekly Budget" is the repo; pick a display name later.
+4. **App name (M7):** "Weekly Grind" (chosen). The repo and code keep the working name `actual-weekly-budget` / `weekly_budget`.
 5. **Commits:** I won't commit or push unless you say so.
 
 ## 9. First steps once approved

@@ -20,7 +20,7 @@ class WeeklyBudgetApp extends StatelessWidget {
   Widget build(BuildContext context) => ValueListenableBuilder<ThemeMode>(
         valueListenable: themeMode,
         builder: (_, mode, _) => MaterialApp(
-          title: 'Weekly Budget',
+          title: 'Weekly Grind',
           themeMode: mode,
           theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
           darkTheme: ThemeData(colorSchemeSeed: Colors.teal, brightness: Brightness.dark, useMaterial3: true),
@@ -166,7 +166,7 @@ class _LockScreen extends StatelessWidget {
             child: Column(mainAxisSize: MainAxisSize.min, children: [
               Icon(Icons.lock_outline, size: 64, color: Theme.of(context).colorScheme.primary),
               const SizedBox(height: 16),
-              Text('Weekly Budget is locked', style: Theme.of(context).textTheme.titleLarge),
+              Text('Weekly Grind is locked', style: Theme.of(context).textTheme.titleLarge),
               if (message != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(message!, textAlign: TextAlign.center)),
               const SizedBox(height: 24),
               FilledButton.icon(
@@ -208,7 +208,7 @@ class _ConnectScreenState extends State<ConnectScreen> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Weekly Budget')),
+        appBar: AppBar(title: const Text('Weekly Grind')),
         body: Padding(
           padding: const EdgeInsets.all(16),
           child: Column(children: [
