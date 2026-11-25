@@ -1,0 +1,17 @@
+# Weekly Grind bridge on the home server. Copy .env.example to bridge.env and fill it in (never commit it).
+# Put split-rules.json / forecast-config.json in ./config (see the *.example.json files in bridge/) and point
+# SPLIT_RULES_FILE / FORECAST_CONFIG_FILE at /config/... in bridge.env.
+services:
+  bridge:
+    image: ghcr.io/codeneedscoffee/actual-weekly-budget-bridge:latest
+    build: ./bridge
+    container_name: weekly-grind-bridge
+    restart: unless-stopped
+    env_file: ./bridge.env
+    ports:
+      - "8787:8787"
+    volumes:
+      - bridge-data:/data # balancing log and the Actual client's local copy
+      - ./config:/config:ro # your split rules and forecast estimates
+volumes:
+  bridge-data:
