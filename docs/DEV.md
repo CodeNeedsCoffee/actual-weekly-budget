@@ -45,3 +45,11 @@ Moves free budget into the Savings category. "Free" is spare balance left after 
 - The app opens straight into the tabs when a bridge address and token are saved (Settings > Change bridge or token clears them).
 - Reads are saved on the phone. When the bridge cannot be reached the last saved answer is shown with an "Offline" banner; writes (apply, sync, categorize) always need the bridge. The saved copy is cleared when the connection is changed.
 - Settings (Accounts tab, gear icon): theme (system, light, dark).
+
+## App lock and encryption
+- The app is locked until the device owner unlocks it with biometrics or, when biometrics are not available or fail, the device PIN/passcode. It locks again after 30 seconds in the background, and while it is in the background the screen shows a cover instead of the budget (so the app switcher shows nothing).
+- The saved bridge address and token live in a hardware-backed keystore entry that needs that unlock for every read. On Android it is a keystore AES key (API 28+, so the minimum is set to 28); on iOS a keychain item with `userPresence` access control, only while a passcode is set, never backed up or synced.
+- The same entry holds a random 256-bit key. The offline copy of the bridge's answers is encrypted with AES-256-GCM under that key, and its entry names are hashed, so the files on the phone show neither the data nor the address. Changing the bridge in Settings wipes the login and the saved copy.
+- If the phone's biometrics change (a new fingerprint is added) or the passcode is removed, the keystore key is invalidated: the app asks for the bridge address and token again. Nothing is lost on the bridge side.
+- Versions before the lock stored the login unprotected; the first unlock moves it into the vault and removes the old copy.
+- iOS: the project is generated with `flutter create --platforms=ios`, with Face ID and local-network usage text and plain-HTTP allowed on the local network. It cannot be built on Linux; it needs `flutter build ios` on a Mac (with an Apple developer account for a device build). It has not been run yet.

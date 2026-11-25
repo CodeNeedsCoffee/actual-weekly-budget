@@ -19,7 +19,7 @@ android {
         applicationId = "dev.weeklybudget.weekly_budget"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 28 // biometric-gated keystore keys need API 28; older phones would skip the prompt
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName

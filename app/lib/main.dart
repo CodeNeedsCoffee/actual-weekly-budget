@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import 'data/bridge_client.dart';
 import 'data/cache.dart';
+import 'data/vault.dart';
 import 'data/settings.dart';
 import 'screens/home_shell.dart';
 
@@ -24,61 +24,165 @@ class WeeklyBudgetApp extends StatelessWidget {
           themeMode: mode,
           theme: ThemeData(colorSchemeSeed: Colors.teal, useMaterial3: true),
           darkTheme: ThemeData(colorSchemeSeed: Colors.teal, brightness: Brightness.dark, useMaterial3: true),
-          home: const StartScreen(),
+          home: const AppLock(),
         ),
       );
 }
 
-const _storage = FlutterSecureStorage();
+/// How long the app can sit in the background before it asks for biometrics again.
+const lockAfter = Duration(seconds: 30);
 
-/// Goes straight to the app when a bridge is saved; screens fall back to saved data if it is unreachable.
-class StartScreen extends StatefulWidget {
-  const StartScreen({super.key});
+/// Keeps the app locked until the device owner proves it is them (biometrics, or the device PIN).
+/// The saved login and the key that encrypts the offline copy are only released by that check.
+class AppLock extends StatefulWidget {
+  const AppLock({super.key});
   @override
-  State<StartScreen> createState() => _StartScreenState();
+  State<AppLock> createState() => _AppLockState();
 }
 
-class _StartScreenState extends State<StartScreen> {
+class _AppLockState extends State<AppLock> with WidgetsBindingObserver {
+  final _vault = Vault();
   BridgeClient? _client;
-  bool _checked = false;
+  bool _locked = true; // true until the check passes
+  bool _busy = false;
+  bool _hidden = false; // the app is not in the foreground: cover it so recents shows nothing
+  bool _needsLogin = false;
+  String? _message;
+  DateTime? _pausedAt;
 
   @override
   void initState() {
     super.initState();
-    _read();
+    WidgetsBinding.instance.addObserver(this);
+    _unlock();
   }
 
-  Future<void> _read() async {
-    try {
-      final url = await _storage.read(key: 'bridge_url');
-      final token = await _storage.read(key: 'bridge_token');
-      if (url != null && url.isNotEmpty && token != null && token.isNotEmpty) {
-        _client = BridgeClient(baseUrl: url, token: token, cache: PrefsCache());
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final away = state != AppLifecycleState.resumed;
+    if (state == AppLifecycleState.paused) _pausedAt ??= DateTime.now();
+    if (state == AppLifecycleState.resumed) {
+      final since = _pausedAt;
+      _pausedAt = null;
+      if (!_locked && since != null && DateTime.now().difference(since) > lockAfter) {
+        setState(() => _locked = true);
+        _unlock();
       }
-    } catch (_) {}
-    if (mounted) setState(() => _checked = true);
+    }
+    if (_hidden != away) setState(() => _hidden = away);
+  }
+
+  Future<void> _unlock() async {
+    if (_busy) return;
+    setState(() {
+      _busy = true;
+      _message = null;
+    });
+    try {
+      final s = await _vault.open();
+      await EncryptedCache.removeLegacy();
+      if (!mounted) return;
+      setState(() {
+        _client = s == null ? null : _clientFor(s);
+        _needsLogin = s == null;
+        _locked = false;
+      });
+    } catch (_) {
+      if (mounted) setState(() => _message = 'Not unlocked. Use your fingerprint or device PIN.');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  BridgeClient _clientFor(Session s) =>
+      BridgeClient(baseUrl: s.url, token: s.token, cache: EncryptedCache(s.cacheKey));
+
+  Future<void> _saveLogin(String url, String token) async {
+    final s = Session.create(url: url, token: token);
+    await _vault.save(s); // asks for biometrics once more to protect the new login
+    if (!mounted) return;
+    setState(() {
+      _client = _clientFor(s);
+      _needsLogin = false;
+    });
   }
 
   Future<void> _disconnect() async {
     try {
-      await PrefsCache().clear();
-      await _storage.delete(key: 'bridge_token');
+      await _client?.cache?.clear();
     } catch (_) {}
-    if (mounted) setState(() => _client = null);
+    await _vault.wipe();
+    if (mounted) {
+      setState(() {
+        _client = null;
+        _needsLogin = true;
+      });
+    }
   }
 
   @override
   Widget build(BuildContext context) {
-    if (!_checked) return const Scaffold(body: Center(child: CircularProgressIndicator()));
-    final c = _client;
-    if (c == null) return ConnectScreen(onConnected: (client) => setState(() => _client = client));
-    return HomeShell(client: c, onDisconnect: _disconnect);
+    final Widget body;
+    if (_locked) {
+      body = _LockScreen(busy: _busy, message: _message, onUnlock: _unlock);
+    } else if (_needsLogin || _client == null) {
+      body = ConnectScreen(onConnect: _saveLogin);
+    } else {
+      body = HomeShell(client: _client!, onDisconnect: _disconnect);
+    }
+    return Stack(children: [
+      Positioned.fill(child: body),
+      if (_hidden && !_locked) const Positioned.fill(child: _Cover()),
+    ]);
   }
 }
 
+class _Cover extends StatelessWidget {
+  const _Cover();
+  @override
+  Widget build(BuildContext context) => ColoredBox(
+        color: Theme.of(context).colorScheme.surface,
+        child: Center(child: Icon(Icons.lock_outline, size: 64, color: Theme.of(context).colorScheme.outline)),
+      );
+}
+
+class _LockScreen extends StatelessWidget {
+  const _LockScreen({required this.busy, required this.message, required this.onUnlock});
+  final bool busy;
+  final String? message;
+  final VoidCallback onUnlock;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Icon(Icons.lock_outline, size: 64, color: Theme.of(context).colorScheme.primary),
+              const SizedBox(height: 16),
+              Text('Weekly Budget is locked', style: Theme.of(context).textTheme.titleLarge),
+              if (message != null) Padding(padding: const EdgeInsets.only(top: 8), child: Text(message!, textAlign: TextAlign.center)),
+              const SizedBox(height: 24),
+              FilledButton.icon(
+                onPressed: busy ? null : onUnlock,
+                icon: const Icon(Icons.fingerprint),
+                label: const Text('Unlock'),
+              ),
+            ]),
+          ),
+        ),
+      );
+}
+
 class ConnectScreen extends StatefulWidget {
-  const ConnectScreen({super.key, required this.onConnected});
-  final ValueChanged<BridgeClient> onConnected;
+  const ConnectScreen({super.key, required this.onConnect});
+  final Future<void> Function(String url, String token) onConnect;
   @override
   State<ConnectScreen> createState() => _ConnectScreenState();
 }
@@ -88,30 +192,17 @@ class _ConnectScreenState extends State<ConnectScreen> {
   final _token = TextEditingController();
   String? _status;
 
-  @override
-  void initState() {
-    super.initState();
-    _load();
-  }
-
-  Future<void> _load() async {
-    try {
-      _url.text = await _storage.read(key: 'bridge_url') ?? '';
-      _token.text = await _storage.read(key: 'bridge_token') ?? '';
-    } catch (_) {}
-  }
-
   Future<void> _connect() async {
+    final url = _url.text.trim(), token = _token.text.trim();
     setState(() => _status = 'Connecting...');
     try {
-      final v = await BridgeClient(baseUrl: _url.text.trim(), token: _token.text.trim()).health();
-      await _storage.write(key: 'bridge_url', value: _url.text.trim());
-      await _storage.write(key: 'bridge_token', value: _token.text.trim());
-      setState(() => _status = 'Connected (Actual client $v)');
-      if (!mounted) return;
-      widget.onConnected(BridgeClient(baseUrl: _url.text.trim(), token: _token.text.trim(), cache: PrefsCache()));
+      final v = await BridgeClient(baseUrl: url, token: token).health();
+      setState(() => _status = 'Connected (Actual client $v). Confirm to save the login securely.');
+      await widget.onConnect(url, token);
     } on BridgeException catch (e) {
       setState(() => _status = e.message);
+    } catch (_) {
+      setState(() => _status = 'Could not save the login. Try again and confirm with your fingerprint or PIN.');
     }
   }
 
