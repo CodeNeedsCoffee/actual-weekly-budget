@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../data/bridge_client.dart';
 import 'accounts_screen.dart';
+import 'balance_screen.dart';
 import 'forecast_screen.dart';
 import 'inbox_screen.dart';
 import 'week_screen.dart';
@@ -25,6 +26,7 @@ class _HomeShellState extends State<HomeShell> {
           WeekScreen(key: ValueKey('week$_reload'), client: widget.client),
           InboxScreen(key: ValueKey('inbox$_reload'), client: widget.client),
           ForecastScreen(key: ValueKey('forecast$_reload'), client: widget.client, onStatus: (s) => setState(() => _fcStatus = s)),
+          BalanceScreen(key: ValueKey('balance$_reload'), client: widget.client, onChanged: () => setState(() => _reload++)),
           AccountsScreen(
             client: widget.client,
             onStaleChanged: (n) => setState(() => _stale = n),
@@ -41,6 +43,7 @@ class _HomeShellState extends State<HomeShell> {
               icon: Badge(isLabelVisible: _fcStatus != 'ok', backgroundColor: _fcStatus == 'bounce' ? Colors.red : Colors.orange, child: const Icon(Icons.timeline)),
               label: 'Forecast',
             ),
+            const NavigationDestination(icon: Icon(Icons.balance), label: 'Month end'),
             NavigationDestination(
               icon: Badge(isLabelVisible: _stale > 0, label: Text('$_stale'), child: const Icon(Icons.account_balance)),
               label: 'Accounts',

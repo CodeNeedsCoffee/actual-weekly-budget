@@ -153,6 +153,30 @@ export async function readForecastInputs(client) {
   return { accounts, schedules };
 }
 
+// Per-month inputs for the extra-income planner. Income categories report balance = budgeted - received,
+// so received = budgeted - balance. `baseIncome` ({ name: cents }) overrides the budgeted base.
+export async function readBalancingMonths(client, months, { baseIncome = {}, excludeIncome = ['starting balances'] } = {}) {
+  const out = [];
+  for (const month of months) {
+    const bm = await client.getBudgetMonth(month);
+    let surplus = 0;
+    const cats = [];
+    for (const g of bm.categoryGroups) {
+      for (const c of g.categories) {
+        if (g.is_income) {
+          if (excludeIncome.includes(c.name.toLowerCase())) continue;
+          const received = c.budgeted - c.balance;
+          surplus += received - (baseIncome[c.name] ?? c.budgeted);
+        } else {
+          cats.push({ id: c.id, name: c.name, budgeted: c.budgeted, balance: c.balance, carryover: !!c.carryover });
+        }
+      }
+    }
+    out.push({ month, surplus, cats });
+  }
+  return out;
+}
+
 // Thin adapter over @actual-app/api. The client version must match the server.
 export async function createActual(cfg) {
   await api.init({
@@ -189,6 +213,8 @@ export async function createActual(cfg) {
       }
     },
     forecastInputs: () => readForecastInputs(api),
+    balancingMonths: (months, opts) => readBalancingMonths(api, months, opts),
+    setBudget: (month, categoryId, cents) => api.setBudgetAmount(month, categoryId, cents),
     close: () => api.shutdown(),
   };
 }

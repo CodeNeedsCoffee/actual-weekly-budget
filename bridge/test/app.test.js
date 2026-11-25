@@ -1,6 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildApp } from '../src/app.js';
+import { createLog } from '../src/balancing_log.js';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 
 const fake = {
   clientVersion: () => '0.0.0',
@@ -31,6 +35,10 @@ const fake = {
       { id: 's1', name: 'Rent', accountId: 'chk', amount: -330000, op: 'is', dateCfg: { start: '2026-12-01', frequency: 'monthly', patterns: [], endMode: 'never' }, nextDate: '2026-12-01', completed: false },
     ],
   }),
+  balancingMonths: async () => [
+    { month: '2026-08', surplus: 5000, cats: [{ id: 'c1', name: 'Groceries', budgeted: 10000, balance: -3000, carryover: true }, { id: 'c2', name: 'Shopping', budgeted: 5000, balance: -9000, carryover: true }] },
+  ],
+  setBudget: async (month, id, cents) => { (fake.budgetWrites ??= []).push([month, id, cents]); },
   setCategory: async (id, categoryId) => { fake.last = [id, categoryId]; },
   categories: async () => [{ id: 'c1', name: 'Groceries', group: 'Food', balance: 8000, spentThisWeek: 1000 }],
 };
@@ -146,4 +154,39 @@ test('forecast and payoff endpoints use the configured account names', async () 
   assert.equal(p.json().incomeLateDays, 7);
   const noCard = await app().inject({ method: 'GET', url: '/payoff', headers: auth });
   assert.equal(noCard.statusCode, 422);
+});
+
+test('balancing: preview, apply once, replay is empty, revert restores', async () => {
+  const log = createLog(join(mkdtempSync(join(tmpdir(), 'app-')), 'log.json'));
+  const a = buildApp({ token: 'tok1', actual: fake, balancingLog: log, forecastConfig: { balancingFrom: '2026-08' } });
+  const get = (url) => a.inject({ method: 'GET', url, headers: auth });
+  const post = (url, payload) => a.inject({ method: 'POST', url, headers: auth, payload });
+
+  const prev = (await get('/balancing/proposal?from=2026-08&to=2026-08')).json();
+  assert.equal(prev.totalAllocated, 5000);
+  assert.deepEqual(prev.months[0].moves.map((m) => [m.categoryId, m.add]), [['c2', 5000]]);
+
+  assert.equal((await post('/balancing/apply', { from: '2026-08', to: '2026-08', id: 'stale' })).statusCode, 409);
+  const done = await post('/balancing/apply', { from: '2026-08', to: '2026-08', id: prev.id });
+  assert.equal(done.json().applied, 1);
+  assert.deepEqual(fake.budgetWrites.at(-1), ['2026-08', 'c2', 10000]);
+
+  // The fake budget does not change, but the log now marks the extra income as spent.
+  const again = (await get('/balancing/proposal?from=2026-08&to=2026-08')).json();
+  assert.equal(again.totalAllocated, 0);
+
+  // Revert: current budget (fake) still shows the old amount, so the cell reads as changed -> conflict, kept.
+  const rev = await post('/balancing/revert', { id: done.json().logId });
+  assert.equal(rev.json().ok, false);
+  assert.equal(rev.json().conflicts.length, 1);
+  assert.equal((await post('/balancing/revert', { id: 'nope' })).statusCode, 404);
+
+  assert.equal((await post('/balancing/record', { month: '2026-08', amount: 100 })).statusCode, 200);
+  assert.equal((await post('/balancing/record', { month: 'x', amount: 100 })).statusCode, 400);
+  assert.equal((await get('/balancing/proposal')).statusCode, 200); // uses balancingFrom
+});
+
+test('balancing is off without a log', async () => {
+  const res = await app().inject({ method: 'GET', url: '/balancing/proposal?from=2026-08&to=2026-08', headers: auth });
+  assert.equal(res.statusCode, 501);
 });

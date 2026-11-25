@@ -16,3 +16,11 @@ Set `FORECAST_CONFIG_FILE` to a JSON file (kept out of git; see `bridge/forecast
 - `items`: estimates for things Actual has no schedule for (paychecks, unscheduled bills): `{ name, amount (cents, + income / - bill), dayOfMonth: [..] }`.
 
 How it works: the 14-day forecast uses worst-case amounts for "approximately" and "between" schedules, and shows the low point with and without income. Card schedules are listed separately, since they hit Checking only when the card is paid. The payoff advisor uses the stated amounts, looks 21 days ahead, and reports `safeNow` (survives a paycheck up to `incomeLateDays` late) and `safeTotal` (if income arrives on time).
+
+## Month-end helper (extra-income pool)
+Config keys (same file as the forecast): `balancingFrom` (first month, `YYYY-MM`), optional `baseIncome` (`{ "<income category>": cents }`, overrides the budgeted income base), `excludeIncome` (income categories to ignore, default `starting balances`).
+
+- `GET /balancing/proposal` previews the plan (per-month extra, where it goes, overspend after); nothing is written.
+- `POST /balancing/apply { id, from, to }` writes it. The id must match the preview, so a changed plan is refused (409).
+- Applied amounts are logged in the bridge data directory (`balancing-log.json`), so the same extra income is never spent twice. `POST /balancing/record { month, amount }` marks extra income already spent outside the app.
+- `POST /balancing/revert { id }` restores the previous amounts. A budget changed since is left alone and reported.

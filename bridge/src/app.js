@@ -7,6 +7,7 @@ import { splitActions } from './splits.js';
 import { splitSuggestionFor } from './split_rules.js';
 import { forecast, payoffAdvice } from './forecast.js';
 import { findAccount } from './forecast_config.js';
+import { planExtraIncome, planId } from './balancing.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -15,7 +16,7 @@ function tokenMatches(given, expected) {
 }
 
 // `actual` is an adapter around @actual-app/api so routes can be tested with a fake.
-export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, logger = false }) {
+export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, balancingLog = null, logger = false }) {
   const fcfg = { checking: 'checking', savings: 'saving', payoffCard: '', buffer: 100000, variablePerDay: 0, items: [], ...forecastConfig };
   const app = Fastify({ logger });
 
@@ -122,6 +123,96 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
       incomeLateDays: fcfg.incomeLateDays ?? 7,
       ...payoffAdvice(onTime.fc, late.fc, Math.max(0, -card.balance)),
     };
+  });
+
+  // ---- Month-end helper: spend extra income (above the income base) on overspent categories ----
+  const monthOk = (m) => /^\d{4}-(0[1-9]|1[0-2])$/.test(m ?? '');
+  const monthsBetween = (from, to) => {
+    const out = [];
+    let [y, m] = from.split('-').map(Number);
+    while (`${y}-${String(m).padStart(2, '0')}` <= to) {
+      out.push(`${y}-${String(m).padStart(2, '0')}`);
+      if (++m > 12) { m = 1; y++; }
+    }
+    return out;
+  };
+  const lastFullMonth = () => {
+    let [y, m] = actual.today().slice(0, 7).split('-').map(Number);
+    if (--m < 1) { m = 12; y--; }
+    return `${y}-${String(m).padStart(2, '0')}`;
+  };
+  const incomeOpts = { baseIncome: fcfg.baseIncome ?? {}, excludeIncome: fcfg.excludeIncome ?? ['starting balances'] };
+
+  async function buildPlan(from, to) {
+    const months = await actual.balancingMonths(monthsBetween(from, to), incomeOpts);
+    const plan = planExtraIncome({ months, used: balancingLog.used() });
+    return { ...plan, id: planId(plan.cells), from, to };
+  }
+  const range = (q) => {
+    const from = q.from || fcfg.balancingFrom;
+    const to = q.to || lastFullMonth();
+    return monthOk(from) && monthOk(to) && from <= to ? { from, to } : null;
+  };
+
+  app.get('/balancing/proposal', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const r = range(req.query);
+    if (!r) return reply.code(400).send({ error: 'from/to must be YYYY-MM (set balancingFrom in the config)' });
+    return buildPlan(r.from, r.to);
+  });
+
+  app.post('/balancing/apply', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const r = range(req.body ?? {});
+    if (!r) return reply.code(400).send({ error: 'from/to must be YYYY-MM' });
+    const plan = await buildPlan(r.from, r.to);
+    if (req.body?.id !== plan.id) return reply.code(409).send({ error: 'plan changed since the preview', id: plan.id });
+    if (plan.cells.length === 0) return reply.code(200).send({ ok: true, applied: 0 });
+    for (const c of plan.cells) await actual.setBudget(c.month, c.categoryId, c.to);
+    const used = {};
+    for (const c of plan.cells) used[c.month] = (used[c.month] ?? 0) + (c.to - c.from);
+    const entry = { id: `apply-${Date.now()}`, at: new Date().toISOString(), kind: 'apply', used, cells: plan.cells };
+    balancingLog.add(entry);
+    return { ok: true, applied: plan.cells.length, total: plan.totalAllocated, logId: entry.id };
+  });
+
+  // Mark extra income as already spent (for changes made outside the app).
+  app.post('/balancing/record', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const { month, amount } = req.body ?? {};
+    if (!monthOk(month) || !Number.isInteger(amount) || amount <= 0) {
+      return reply.code(400).send({ error: 'month (YYYY-MM) and amount (cents) required' });
+    }
+    const entry = { id: `manual-${Date.now()}`, at: new Date().toISOString(), kind: 'manual', used: { [month]: amount }, cells: [] };
+    balancingLog.add(entry);
+    return { ok: true, logId: entry.id };
+  });
+
+  app.get('/balancing/log', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    return { entries: balancingLog.entries().map((e) => ({ id: e.id, at: e.at, kind: e.kind, used: e.used, cells: e.cells.length })) };
+  });
+
+  // Restores the previous budget amounts. A cell someone has changed since is left alone and reported.
+  app.post('/balancing/revert', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const entry = balancingLog.get(req.body?.id);
+    if (!entry) return reply.code(404).send({ error: 'no such log entry' });
+    const months = [...new Set(entry.cells.map((c) => c.month))];
+    const now = months.length ? await actual.balancingMonths(months, incomeOpts) : [];
+    const current = new Map(now.flatMap((m) => m.cats.map((c) => [`${m.month}|${c.id}`, c.budgeted])));
+    const conflicts = [];
+    let restored = 0;
+    for (const c of entry.cells) {
+      if (current.get(`${c.month}|${c.categoryId}`) !== c.to) {
+        conflicts.push({ month: c.month, categoryId: c.categoryId, name: c.name });
+        continue;
+      }
+      await actual.setBudget(c.month, c.categoryId, c.from);
+      restored++;
+    }
+    if (conflicts.length === 0) balancingLog.remove(entry.id);
+    return { ok: conflicts.length === 0, restored, conflicts };
   });
 
   app.get('/categories', async () => ({ categories: await actual.listCategories() }));

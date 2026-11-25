@@ -7,6 +7,9 @@ const DEFAULTS = {
   payoffCard: '', // substring of the card account to pay down
   buffer: 100000,
   variablePerDay: 0, // estimated everyday spending paid from Checking
+  balancingFrom: '', // first month (YYYY-MM) the month-end helper looks at
+  baseIncome: {}, // optional { incomeCategoryName: cents } overriding the budgeted income base
+  excludeIncome: ['starting balances'],
   items: [], // estimates for things Actual has no schedule for: { name, amount, dayOfMonth: [..] }
 };
 

@@ -8,6 +8,7 @@ void main() {
   inboxTests();
   syncTests();
   forecastTests();
+  balancingTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
@@ -105,5 +106,37 @@ void forecastTests() {
     expect(f.path.single.items.single.name, 'Rent');
     final p = await c.payoff();
     expect(p!.safeNow, 200000);
+  });
+}
+
+void balancingTests() {
+  test('proposal, apply and revert round trip', () async {
+    final seen = <String>[];
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((req) async {
+        seen.add('${req.method} ${req.url.path}');
+        if (req.url.path == '/balancing/proposal') {
+          return http.Response(
+              '{"id":"abc","from":"2026-06","to":"2026-10","totalAllocated":35151,"months":[{"month":"2026-06","surplus":35151,"used":0,"allocated":35151,"poolAfter":0,"overspentAfter":-100,"moves":[{"categoryId":"c","name":"Shopping","add":35151}]}],"cells":[]}',
+              200);
+        }
+        if (req.url.path == '/balancing/revert') return http.Response('{"ok":false,"restored":1,"conflicts":[{"month":"m"}]}', 200);
+        return http.Response('{"ok":true}', 200);
+      }),
+    );
+    final p = await c.balancingProposal();
+    expect(p.total, 35151);
+    expect(p.months.single.moves.single.name, 'Shopping');
+    await c.applyBalancing(p);
+    expect(await c.revertBalancing('apply-1'), 1);
+    expect(seen, ['GET /balancing/proposal', 'POST /balancing/apply', 'POST /balancing/revert']);
+  });
+
+  test('a stale plan is reported readably', () async {
+    final c = BridgeClient(baseUrl: 'http://h:1', token: 't', client: MockClient((_) async => http.Response('{}', 409)));
+    expect(
+        c.applyBalancing(BalanceProposal(id: 'x', from: 'a', to: 'b', total: 0, months: [])), throwsA(isA<BridgeException>()));
   });
 }
