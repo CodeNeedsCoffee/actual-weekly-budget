@@ -11,6 +11,7 @@ void main() {
   forecastTests();
   balancingTests();
   rebalanceTests();
+  sweepTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
@@ -172,5 +173,37 @@ void rebalanceTests() {
   test('history shows moved amount for rebalance entries', () {
     final e = BalanceLogEntry.fromJson({'id': 'a', 'at': '2026-11-25T00:00:00Z', 'kind': 'rebalance', 'used': {}, 'moved': 4200, 'cells': 3});
     expect(e.total, 4200);
+  });
+}
+
+void sweepTests() {
+  test('sweep proposal parses cash check and apply sends the amount', () async {
+    Map<String, dynamic>? sent;
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((req) async {
+        if (req.method == 'POST') {
+          sent = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response('{"ok":true}', 200);
+        }
+        expect(req.url.queryParameters['amount'], '20000');
+        return http.Response(
+            '{"id":"s1","month":"2026-10","free":345039,"total":20000,"takes":[{"name":"Groceries","amount":20000}],"stillOverspent":0,"cash":{"lowAfter":-188015,"lowDate":"2026-12-09","buffer":100000,"safe":false}}',
+            200);
+      }),
+    );
+    final p = await c.sweepProposal(amount: 20000);
+    expect(p.free, 345039);
+    expect(p.cash!.safe, isFalse);
+    expect(p.takes.single.name, 'Groceries');
+    await c.applySweep(p, amount: 20000);
+    expect(sent!['amount'], 20000);
+    expect(sent!['month'], '2026-10');
+  });
+
+  test('sweep history entries show the moved amount', () {
+    final e = BalanceLogEntry.fromJson({'id': 'a', 'at': '2026-11-25T00:00:00Z', 'kind': 'sweep', 'used': {}, 'moved': 345039, 'cells': 23});
+    expect(e.total, 345039);
   });
 }

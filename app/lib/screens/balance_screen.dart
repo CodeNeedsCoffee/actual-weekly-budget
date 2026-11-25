@@ -14,6 +14,9 @@ class BalanceScreen extends StatefulWidget {
 class _BalanceScreenState extends State<BalanceScreen> {
   BalanceProposal? _proposal;
   RebalanceProposal? _rebalance;
+  SweepProposal? _sweep;
+  int? _sweepAmount; // cents; null = all free money
+  final _sweepField = TextEditingController();
   bool _includeSavings = false;
   List<BalanceLogEntry> _log = [];
   String? _error;
@@ -31,11 +34,13 @@ class _BalanceScreenState extends State<BalanceScreen> {
         widget.client.balancingProposal(),
         widget.client.balancingLog(),
         widget.client.rebalanceProposal(includeSavings: _includeSavings),
+        widget.client.sweepProposal(amount: _sweepAmount),
       ]);
       setState(() {
         _proposal = results[0] as BalanceProposal;
         _log = (results[1] as List<BalanceLogEntry>).reversed.toList();
         _rebalance = results[2] as RebalanceProposal;
+        _sweep = results[3] as SweepProposal;
         _error = null;
       });
     } on BridgeException catch (e) {
@@ -116,6 +121,56 @@ class _BalanceScreenState extends State<BalanceScreen> {
         ),
       );
 
+  Future<void> _applySweep(SweepProposal s) async {
+    final unsafe = s.cash != null && !s.cash!.safe;
+    final ok = await _confirm('Move ${money(s.total)} to Savings?',
+        'Lowers ${s.takes.length} budgets and raises the Savings budget by ${money(s.total)}.'
+        '${unsafe ? '\n\nMoving that much cash from Checking could leave it at ${money(s.cash!.lowAfter)} around ${s.cash!.lowDate}.' : ''}'
+        ' You can undo it afterwards.',
+        'Apply');
+    if (ok) await _run(() => widget.client.applySweep(s, amount: _sweepAmount), done: 'Moved ${money(s.total)} to Savings');
+  }
+
+  Widget _sweepCard(BuildContext context, SweepProposal s) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Move to Savings (${s.month})', style: Theme.of(context).textTheme.titleMedium),
+            if (s.free > 0) ...[
+              Text('Free to move: ${money(s.free)}', style: Theme.of(context).textTheme.headlineSmall),
+              const Text('Spare budget left after every overspent budget is covered.'),
+              const SizedBox(height: 8),
+              for (final t in s.takes.take(5)) Text('${t.name}  ${money(t.amount)}', style: Theme.of(context).textTheme.bodySmall),
+              if (s.takes.length > 5) Text('and ${s.takes.length - 5} more', style: Theme.of(context).textTheme.bodySmall),
+              TextField(
+                controller: _sweepField,
+                keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                decoration: const InputDecoration(labelText: 'Amount (blank = all free money)', prefixText: '\$'),
+                onSubmitted: (v) {
+                  _sweepAmount = v.trim().isEmpty ? null : parseCents(v);
+                  _load();
+                },
+              ),
+              if (s.cash != null)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8),
+                  child: Text(
+                    s.cash!.safe
+                        ? 'Cash check: Checking stays above your buffer if you move ${money(s.total)}.'
+                        : 'Cash check: moving ${money(s.total)} of real cash could leave Checking at ${money(s.cash!.lowAfter)} around ${s.cash!.lowDate}.',
+                    style: TextStyle(color: s.cash!.safe ? null : Theme.of(context).colorScheme.error),
+                  ),
+                ),
+              const SizedBox(height: 8),
+              FilledButton(onPressed: _busy || s.total == 0 ? null : () => _applySweep(s), child: Text('Move ${money(s.total)}')),
+            ] else
+              Text(s.stillOverspent < 0
+                  ? 'Nothing free: overspent budgets use all the spare money (${money(s.stillOverspent.abs())} still overspent).'
+                  : 'Nothing free to move.'),
+          ]),
+        ),
+      );
+
   Future<void> _revert(BalanceLogEntry e) async {
     final ok = await _confirm('Undo this change?', 'Restores the budget amounts from before (${money(e.total)}).', 'Undo');
     if (!ok) return;
@@ -156,6 +211,7 @@ class _BalanceScreenState extends State<BalanceScreen> {
                     ),
                   ),
                   if (_rebalance != null) _rebalanceCard(context, _rebalance!),
+                  if (_sweep != null) _sweepCard(context, _sweep!),
                   for (final m in p.months)
                     ExpansionTile(
                       title: Text(m.month),
@@ -171,7 +227,7 @@ class _BalanceScreenState extends State<BalanceScreen> {
                     const Padding(padding: EdgeInsets.only(top: 16, bottom: 4), child: Text('History')),
                     for (final e in _log)
                       ListTile(
-                        title: Text('${{'apply': 'Extra income applied', 'rebalance': 'Rebalanced', 'manual': 'Recorded'}[e.kind] ?? e.kind} ${money(e.total)}'),
+                        title: Text('${{'apply': 'Extra income applied', 'rebalance': 'Rebalanced', 'sweep': 'Moved to Savings', 'manual': 'Recorded'}[e.kind] ?? e.kind} ${money(e.total)}'),
                         subtitle: Text(e.at.substring(0, 10)),
                         trailing: TextButton(onPressed: _busy ? null : () => _revert(e), child: const Text('Undo')),
                       ),

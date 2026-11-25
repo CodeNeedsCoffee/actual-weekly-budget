@@ -72,5 +72,12 @@ export function planRebalance({ months, includeSavings = false }) {
     month: m.month,
     amount: rows.reduce((s, r) => s + (r.bal[mi] !== undefined && r.bal[mi] < 0 ? r.bal[mi] : 0), 0),
   }));
-  return { moves, cells, total: moves.reduce((s, x) => s + x.amount, 0), overspentAfter };
+  // Money still free in the last month once every deficit the plan could cover is covered.
+  const last = months.length - 1;
+  const spare = rows
+    .filter((r) => !r.isSavings && !r.protected && r.bal[last] !== undefined)
+    .map((r) => ({ id: r.id, name: r.name, budgeted: r.orig[last], capacity: capacity(r, last) }))
+    .filter((x) => x.capacity > 0)
+    .sort((a, b) => b.capacity - a.capacity);
+  return { moves, cells, total: moves.reduce((s, x) => s + x.amount, 0), overspentAfter, spare };
 }

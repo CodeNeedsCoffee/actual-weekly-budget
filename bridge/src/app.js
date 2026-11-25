@@ -9,6 +9,7 @@ import { forecast, payoffAdvice } from './forecast.js';
 import { findAccount } from './forecast_config.js';
 import { planExtraIncome, planId } from './balancing.js';
 import { planRebalance } from './rebalance.js';
+import { planSweep } from './sweep.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -156,10 +157,10 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
   };
 
   // ---- Zero-sum rebalance: move spare budget into overspent categories (Savings only if asked, last) ----
-  async function buildRebalance(from, to, includeSavings) {
+  async function flaggedMonths(from, to) {
     const savings = (fcfg.savingsCategory ?? 'Savings').toLowerCase();
     const protectedNames = new Set((fcfg.protect ?? []).map((n) => n.toLowerCase()));
-    const months = (await actual.balancingMonths(monthsBetween(from, to), incomeOpts)).map((m) => ({
+    return (await actual.balancingMonths(monthsBetween(from, to), incomeOpts)).map((m) => ({
       month: m.month,
       cats: m.cats.map((c) => ({
         ...c,
@@ -167,9 +168,13 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
         protected: protectedNames.has(c.name.toLowerCase()),
       })),
     }));
-    const plan = planRebalance({ months, includeSavings });
+  }
+
+  async function buildRebalance(from, to, includeSavings) {
+    const plan = planRebalance({ months: await flaggedMonths(from, to), includeSavings });
     return { ...plan, id: planId(plan.cells), from, to, includeSavings };
   }
+
   const rebalanceRange = (src) => {
     const to = src.to || lastFullMonth();
     const from = src.from || to; // the month that just ended, unless a range is given
@@ -192,6 +197,49 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
     if (plan.cells.length === 0) return { ok: true, applied: 0 };
     for (const c of plan.cells) await actual.setBudget(c.month, c.categoryId, c.to);
     const entry = { id: `rebalance-${Date.now()}`, at: new Date().toISOString(), kind: 'rebalance', used: {}, moved: plan.total, cells: plan.cells };
+    balancingLog.add(entry);
+    return { ok: true, applied: plan.cells.length, total: plan.total, logId: entry.id };
+  });
+
+  // ---- Savings sweep: move free budget (left after overspent categories are covered) into Savings ----
+  async function buildSweep(month, amount) {
+    const plan = planSweep({ months: await flaggedMonths(month, month), amount });
+    if (plan.error) return plan;
+    // Moving real cash to the Savings account must not cause a bounce in the next 14 days.
+    let cash = null;
+    const r = plan.total > 0 ? await runForecast(14) : null;
+    if (r && !r.error) {
+      const lowAfter = r.fc.lowWithoutIncome.amount - plan.total;
+      cash = { lowAfter, lowDate: r.fc.lowWithoutIncome.date, buffer: r.fc.buffer, safe: lowAfter >= r.fc.buffer };
+    }
+    return { ...plan, id: planId(plan.cells), amountRequested: amount, cash };
+  }
+  const sweepParams = (src) => {
+    const month = src.month || lastFullMonth();
+    const raw = src.amount;
+    const amount = raw === undefined || raw === null || raw === '' ? null : Number(raw);
+    if (!monthOk(month) || (amount !== null && (!Number.isInteger(amount) || amount < 0))) return null;
+    return { month, amount };
+  };
+
+  app.get('/sweep/proposal', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const p = sweepParams(req.query);
+    if (!p) return reply.code(400).send({ error: 'month must be YYYY-MM and amount whole cents' });
+    const plan = await buildSweep(p.month, p.amount);
+    return plan.error ? reply.code(422).send(plan) : plan;
+  });
+
+  app.post('/sweep/apply', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const p = sweepParams(req.body ?? {});
+    if (!p) return reply.code(400).send({ error: 'month must be YYYY-MM and amount whole cents' });
+    const plan = await buildSweep(p.month, p.amount);
+    if (plan.error) return reply.code(422).send(plan);
+    if (req.body?.id !== plan.id) return reply.code(409).send({ error: 'plan changed since the preview', id: plan.id });
+    if (plan.cells.length === 0) return { ok: true, applied: 0 };
+    for (const c of plan.cells) await actual.setBudget(c.month, c.categoryId, c.to);
+    const entry = { id: `sweep-${Date.now()}`, at: new Date().toISOString(), kind: 'sweep', used: {}, moved: plan.total, cells: plan.cells };
     balancingLog.add(entry);
     return { ok: true, applied: plan.cells.length, total: plan.total, logId: entry.id };
   });

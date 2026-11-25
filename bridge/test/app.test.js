@@ -223,3 +223,35 @@ test('rebalance: preview, stale id refused, apply logs a reversible entry', asyn
   const withSav = (await get('/rebalance/proposal?includeSavings=1')).json();
   assert.equal(withSav.includeSavings, true);
 });
+
+test('sweep: previews free money with a cash check, applies once, and is reversible via the log', async () => {
+  const log = createLog(join(mkdtempSync(join(tmpdir(), 'sw-')), 'log.json'));
+  const fakeSw = {
+    ...fake,
+    today: () => '2026-11-24',
+    balancingMonths: async () => [
+      { month: '2026-10', surplus: 0, cats: [
+        { id: 'c1', name: 'Groceries', budgeted: 10000, balance: 6000, carryover: false },
+        { id: 'c2', name: 'Rent', budgeted: 10000, balance: 9000, carryover: false },
+        { id: 'c4', name: 'Savings', budgeted: 0, balance: 0, carryover: false },
+      ] },
+    ],
+  };
+  const a = buildApp({ token: 'tok1', actual: fakeSw, balancingLog: log, forecastConfig: { protect: ['rent'], payoffCard: 'big card' } });
+  const get = (url) => a.inject({ method: 'GET', url, headers: auth });
+  const post = (url, payload) => a.inject({ method: 'POST', url, headers: auth, payload });
+
+  const prev = (await get('/sweep/proposal')).json();
+  assert.equal(prev.month, '2026-10');
+  assert.equal(prev.free, 6000);
+  assert.equal(prev.total, 6000);
+  assert.equal(prev.cash.safe, true); // 470000 low after rent in the fake forecast, minus 6000, vs 100000 buffer
+  const part = (await get('/sweep/proposal?amount=2500')).json();
+  assert.equal(part.total, 2500);
+
+  assert.equal((await post('/sweep/apply', { id: 'stale' })).statusCode, 409);
+  const done = await post('/sweep/apply', { id: prev.id });
+  assert.equal(done.json().applied, 2);
+  assert.equal((await get('/balancing/log')).json().entries[0].kind, 'sweep');
+  assert.equal((await get('/sweep/proposal?amount=-5')).statusCode, 400);
+});

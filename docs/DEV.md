@@ -31,3 +31,9 @@ Moves budget from categories with spare balance into overspent ones, biggest def
 - `POST /rebalance/apply { id, from, to, includeSavings }` writes it (id must match the preview). It is logged, and `POST /balancing/revert` undoes it.
 - Rules: budgets never go below zero (only Savings may, and only when `includeSavings` is on, after every other donor); a donor is limited so it is not overspent in a later month through carryover; overspent categories are never donors.
 - The bridge pulls changes from the server before reads (at most every few seconds), so edits made in the Actual app are picked up.
+
+## Savings sweep
+Moves free budget into the Savings category. "Free" is spare balance left after every overspent category has been covered (the rebalance comes first), so the two never compete. Protected categories are never touched, no budget goes below zero, and Savings is never a donor.
+- `GET /sweep/proposal?month=&amount=` previews (defaults to the month that just ended and all free money; `amount` in cents is capped at what is free). It includes a cash check: the 14-day forecast low without income, minus the amount, against the buffer.
+- `POST /sweep/apply { id, month, amount? }` writes it (id must match the preview). It is logged, and `POST /balancing/revert` undoes it.
+- Budgets are plans, not cash. The cash check warns when moving that much real money to the Savings account could leave Checking under the buffer.
