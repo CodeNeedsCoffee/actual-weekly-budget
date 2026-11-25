@@ -68,12 +68,5 @@
 	</array>
 	<key>NSFaceIDUsageDescription</key>
 	<string>Unlock Weekly Grind and its saved login with Face ID.</string>
-	<key>NSLocalNetworkUsageDescription</key>
-	<string>Weekly Grind talks to the bridge service on your home network.</string>
-	<key>NSAppTransportSecurity</key>
-	<dict>
-		<key>NSAllowsLocalNetworking</key>
-		<true/>
-	</dict>
 </dict>
 </plist>

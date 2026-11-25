@@ -11,6 +11,7 @@ import { planExtraIncome, planId } from './balancing.js';
 import { planRebalance } from './rebalance.js';
 import { planSweep } from './sweep.js';
 import { recoverySummary } from './recovery.js';
+import { createGuard, securityHeaders } from './security.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -19,23 +20,47 @@ function tokenMatches(given, expected) {
 }
 
 // `actual` is an adapter around @actual-app/api so routes can be tested with a fake.
-export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, balancingLog = null, logger = false }) {
+// clientIpHeader: a header the proxy in front sets to the real client address (Cloudflare: cf-connecting-ip).
+// Only set it when the bridge is reachable through that proxy alone, otherwise callers could forge it.
+export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, balancingLog = null, logger = false, clientIpHeader = '', guard = createGuard() }) {
   const fcfg = { checking: 'checking', savings: 'saving', payoffCard: '', buffer: 100000, variablePerDay: 0, items: [], ...forecastConfig };
-  const app = Fastify({ logger });
+  const app = Fastify({
+    logger: logger && { redact: ['req.headers.authorization'] },
+    bodyLimit: 32 * 1024,
+    requestTimeout: 30_000,
+    maxParamLength: 200,
+  });
+  const clientIp = (req) => (clientIpHeader && String(req.headers[clientIpHeader] ?? '').split(',')[0].trim()) || req.ip;
 
-  app.addHook('onRequest', async (req, reply) => {
-    if (req.url === '/health') return;
-    const header = req.headers.authorization ?? '';
-    const given = header.startsWith('Bearer ') ? header.slice(7) : '';
-    if (!tokenMatches(given, token)) {
-      return reply.code(401).send({ error: 'unauthorized' });
-    }
+  app.addHook('onSend', async (req, reply) => {
+    for (const [k, v] of Object.entries(securityHeaders)) reply.header(k, v);
   });
 
-  app.get('/health', async () => ({
-    ok: true,
-    apiClientVersion: actual.clientVersion(),
-  }));
+  // Details never leave the server: a failure is logged, the caller only sees a generic message.
+  app.setErrorHandler((err, req, reply) => {
+    if (err.statusCode && err.statusCode < 500) return reply.code(err.statusCode).send({ error: 'bad request' });
+    req.log.error(err);
+    return reply.code(500).send({ error: 'internal error' });
+  });
+
+  // Every route, including unknown ones, needs the token, so callers cannot discover what exists.
+  // /health without any credentials only says the service is up (for container health checks).
+  app.addHook('onRequest', async (req, reply) => {
+    const ip = clientIp(req);
+    const limited = guard.check(ip);
+    if (limited) return reply.code(429).header('retry-after', limited.retryAfter).send({ error: 'too many requests' });
+    const header = req.headers.authorization ?? '';
+    if (!header && req.url.split('?')[0] === '/health') return;
+    const given = header.startsWith('Bearer ') ? header.slice(7) : '';
+    if (!tokenMatches(given, token)) {
+      guard.failure(ip);
+      return reply.code(401).send({ error: 'unauthorized' });
+    }
+    guard.success(ip);
+    req.authed = true;
+  });
+
+  app.get('/health', async (req) => (req.authed ? { ok: true, apiClientVersion: actual.clientVersion() } : { ok: true }));
 
   app.get('/summary', async () => actual.summary());
 

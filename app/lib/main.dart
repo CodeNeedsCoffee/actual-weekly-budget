@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -48,6 +49,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver {
   bool _hidden = false; // the app is not in the foreground: cover it so recents shows nothing
   bool _needsLogin = false;
   String? _message;
+  String? _notice; // shown on the connect screen
   DateTime? _pausedAt;
 
   @override
@@ -85,12 +87,24 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver {
       _message = null;
     });
     try {
-      final s = await _vault.open();
+      var s = await _vault.open();
       await EncryptedCache.removeLegacy();
+      String? notice;
+      if (s != null) {
+        try {
+          BridgeClient.checkAddress(s.url, allowInsecure: kDebugMode);
+        } on BridgeException {
+          // A login saved by an older version over plain http: drop it, the token may have been exposed.
+          await _vault.wipe();
+          s = null;
+          notice = 'The saved address did not use https, so it was removed. Enter an https address, and change the token on the bridge.';
+        }
+      }
       if (!mounted) return;
       setState(() {
         _client = s == null ? null : _clientFor(s);
         _needsLogin = s == null;
+        _notice = notice;
         _locked = false;
       });
     } catch (_) {
@@ -100,11 +114,17 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver {
     }
   }
 
-  BridgeClient _clientFor(Session s) =>
-      BridgeClient(baseUrl: s.url, token: s.token, cache: EncryptedCache(s.cacheKey));
+  BridgeClient _clientFor(Session s) => BridgeClient(
+        baseUrl: s.url,
+        token: s.token,
+        cache: EncryptedCache(s.cacheKey),
+        allowInsecure: kDebugMode, // release builds only ever talk https
+        accessId: s.accessId,
+        accessSecret: s.accessSecret,
+      );
 
-  Future<void> _saveLogin(String url, String token) async {
-    final s = Session.create(url: url, token: token);
+  Future<void> _saveLogin(String url, String token, String? accessId, String? accessSecret) async {
+    final s = Session.create(url: url, token: token, accessId: accessId, accessSecret: accessSecret);
     await _vault.save(s); // asks for biometrics once more to protect the new login
     if (!mounted) return;
     setState(() {
@@ -132,7 +152,7 @@ class _AppLockState extends State<AppLock> with WidgetsBindingObserver {
     if (_locked) {
       body = _LockScreen(busy: _busy, message: _message, onUnlock: _unlock);
     } else if (_needsLogin || _client == null) {
-      body = ConnectScreen(onConnect: _saveLogin);
+      body = ConnectScreen(onConnect: _saveLogin, notice: _notice);
     } else {
       body = HomeShell(client: _client!, onDisconnect: _disconnect);
     }
@@ -181,8 +201,9 @@ class _LockScreen extends StatelessWidget {
 }
 
 class ConnectScreen extends StatefulWidget {
-  const ConnectScreen({super.key, required this.onConnect});
-  final Future<void> Function(String url, String token) onConnect;
+  const ConnectScreen({super.key, required this.onConnect, this.notice});
+  final Future<void> Function(String url, String token, String? accessId, String? accessSecret) onConnect;
+  final String? notice;
   @override
   State<ConnectScreen> createState() => _ConnectScreenState();
 }
@@ -190,15 +211,29 @@ class ConnectScreen extends StatefulWidget {
 class _ConnectScreenState extends State<ConnectScreen> {
   final _url = TextEditingController();
   final _token = TextEditingController();
+  final _accessId = TextEditingController();
+  final _accessSecret = TextEditingController();
   String? _status;
 
   Future<void> _connect() async {
-    final url = _url.text.trim(), token = _token.text.trim();
-    setState(() => _status = 'Connecting...');
+    final token = _token.text.trim();
+    final id = _accessId.text.trim(), secret = _accessSecret.text.trim();
+    if (id.isEmpty != secret.isEmpty) {
+      setState(() => _status = 'Enter both the Access client ID and secret, or neither.');
+      return;
+    }
     try {
-      final v = await BridgeClient(baseUrl: url, token: token).health();
+      final url = BridgeClient.checkAddress(_url.text, allowInsecure: kDebugMode);
+      setState(() => _status = 'Connecting...');
+      final v = await BridgeClient(
+        baseUrl: url,
+        token: token,
+        allowInsecure: kDebugMode,
+        accessId: id.isEmpty ? null : id,
+        accessSecret: secret.isEmpty ? null : secret,
+      ).health();
       setState(() => _status = 'Connected (Actual client $v). Confirm to save the login securely.');
-      await widget.onConnect(url, token);
+      await widget.onConnect(url, token, id.isEmpty ? null : id, secret.isEmpty ? null : secret);
     } on BridgeException catch (e) {
       setState(() => _status = e.message);
     } catch (_) {
@@ -211,15 +246,24 @@ class _ConnectScreenState extends State<ConnectScreen> {
         appBar: AppBar(title: const Text('Weekly Grind')),
         body: Padding(
           padding: const EdgeInsets.all(16),
-          child: Column(children: [
+          child: ListView(children: [
+            if (widget.notice != null) Padding(padding: const EdgeInsets.only(bottom: 12), child: Text(widget.notice!)),
             TextField(
                 controller: _url,
-                decoration: const InputDecoration(labelText: 'Bridge address'),
+                decoration: const InputDecoration(labelText: 'Bridge address (https://...)'),
                 keyboardType: TextInputType.url),
             TextField(
                 controller: _token,
                 decoration: const InputDecoration(labelText: 'Token'),
                 obscureText: true),
+            ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              title: const Text('Cloudflare Access (optional)'),
+              children: [
+                TextField(controller: _accessId, decoration: const InputDecoration(labelText: 'Access client ID'), autocorrect: false),
+                TextField(controller: _accessSecret, decoration: const InputDecoration(labelText: 'Access client secret'), obscureText: true),
+              ],
+            ),
             const SizedBox(height: 16),
             FilledButton(onPressed: _connect, child: const Text('Connect')),
             if (_status != null) Padding(padding: const EdgeInsets.all(12), child: Text(_status!)),

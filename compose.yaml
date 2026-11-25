@@ -1,6 +1,10 @@
-# Weekly Grind bridge on the home server. Copy .env.example to bridge.env and fill it in (never commit it).
-# Put split-rules.json / forecast-config.json in ./config (see the *.example.json files in bridge/) and point
-# SPLIT_RULES_FILE / FORECAST_CONFIG_FILE at /config/... in bridge.env.
+# Weekly Grind bridge plus its Cloudflare tunnel, for a home server.
+#   bridge.env      from .env.example (the bridge's settings and secrets)
+#   cloudflared.env contains TUNNEL_TOKEN=... from the Cloudflare Zero Trust dashboard
+# Neither file is ever committed. Put split-rules.json / forecast-config.json in ./config (see bridge/*.example.json).
+#
+# The bridge publishes no port: the only way in is the tunnel, so every request passes Cloudflare first.
+# In the tunnel's public hostname settings, point the service at http://bridge:8787.
 services:
   bridge:
     image: ghcr.io/codeneedscoffee/actual-weekly-budget-bridge:latest
@@ -8,10 +12,42 @@ services:
     container_name: weekly-grind-bridge
     restart: unless-stopped
     env_file: ./bridge.env
-    ports:
-      - "8787:8787"
+    environment:
+      CLIENT_IP_HEADER: cf-connecting-ip # lets the bridge lock out a single misbehaving client, not the whole tunnel
+    expose:
+      - "8787"
     volumes:
       - bridge-data:/data # balancing log and the Actual client's local copy
       - ./config:/config:ro # your split rules and forecast estimates
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 200
+    mem_limit: 768m
+    networks: [internal]
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: weekly-grind-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    env_file: ./cloudflared.env
+    depends_on:
+      bridge:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 100
+    mem_limit: 256m
+    networks: [internal]
+
+networks:
+  internal:
+
 volumes:
   bridge-data:

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { createGuard } from '../src/security.js';
 import { buildApp } from '../src/app.js';
 import { createLog } from '../src/balancing_log.js';
 import { mkdtempSync } from 'node:fs';
@@ -44,10 +45,14 @@ const fake = {
 };
 const app = () => buildApp({ token: 'tok1', actual: fake });
 
-test('health is open and reports client version', async () => {
-  const res = await app().inject({ method: 'GET', url: '/health' });
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json(), { ok: true, apiClientVersion: '0.0.0' });
+test('health says only "up" without credentials, and reports the client version with the token', async () => {
+  const open = await app().inject({ method: 'GET', url: '/health' });
+  assert.equal(open.statusCode, 200);
+  assert.deepEqual(open.json(), { ok: true });
+  const authed = await app().inject({ method: 'GET', url: '/health', headers: auth });
+  assert.deepEqual(authed.json(), { ok: true, apiClientVersion: '0.0.0' });
+  const wrong = await app().inject({ method: 'GET', url: '/health', headers: { authorization: 'Bearer nope' } });
+  assert.equal(wrong.statusCode, 401); // a wrong token is never answered as if it were fine
 });
 
 test('protected routes reject missing or wrong token', async () => {
@@ -275,4 +280,37 @@ test('recovery: running overspend per month and what is left to recover', async 
   assert.equal(r.overspentNow, 4000);
   assert.equal(r.leftToRecover, 0);
   assert.equal((await a.inject({ method: 'GET', url: '/recovery?from=2027-01', headers: auth })).statusCode, 400);
+});
+
+test('security: unauthenticated callers learn nothing, wrong tokens get locked out, headers are strict', async () => {
+  const guard = createGuard({ maxFailures: 3, lockMs: 60_000 });
+  const a = buildApp({ token: 'tok1', actual: fake, guard, clientIpHeader: 'cf-connecting-ip' });
+  const get = (url, headers = {}) => a.inject({ method: 'GET', url, headers });
+
+  const open = await get('/health');
+  assert.deepEqual(open.json(), { ok: true }); // no client version without the token
+  assert.equal((await get('/health', auth)).json().apiClientVersion, '0.0.0');
+  assert.equal((await get('/no/such/route')).statusCode, 401); // unknown routes look the same as real ones
+  assert.equal((await get('/weekly')).statusCode, 401);
+
+  const h = open.headers;
+  assert.equal(h['cache-control'], 'no-store');
+  assert.equal(h['x-content-type-options'], 'nosniff');
+  assert.match(h['content-security-policy'], /default-src 'none'/);
+
+  const bad = { authorization: 'Bearer nope', 'cf-connecting-ip': '203.0.113.9' };
+  for (let i = 0; i < 3; i++) assert.equal((await get('/weekly', bad)).statusCode, 401);
+  const locked = await get('/weekly', { ...auth, 'cf-connecting-ip': '203.0.113.9' }); // even the right token waits
+  assert.equal(locked.statusCode, 429);
+  assert.ok(Number(locked.headers['retry-after']) > 0);
+  assert.equal((await get('/weekly', { ...auth, 'cf-connecting-ip': '198.51.100.7' })).statusCode, 200); // other callers fine
+});
+
+test('security: internal errors never leak details', async () => {
+  const boom = { ...fake, categories: async () => { throw new Error('secret path /srv/budget password=hunter2'); } };
+  const a = buildApp({ token: 'tok1', actual: boom });
+  const res = await a.inject({ method: 'GET', url: '/weekly', headers: auth });
+  assert.equal(res.statusCode, 500);
+  assert.deepEqual(res.json(), { error: 'internal error' });
+  assert.equal((await a.inject({ method: 'POST', url: '/sync', headers: { ...auth, 'content-type': 'application/json' }, payload: 'x'.repeat(40000) })).statusCode, 413);
 });

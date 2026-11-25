@@ -15,18 +15,19 @@ void main() {
   sweepTests();
   offlineTests();
   recoveryTests();
+  securityTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
       return http.Response('{"ok":true,"apiClientVersion":"26.11.0"}', 200);
     });
-    final c = BridgeClient(baseUrl: 'http://h:1/', token: 't', client: mock);
+    final c = BridgeClient(baseUrl: 'https://h:1/', token: 't', client: mock);
     expect(await c.health(), '26.11.0');
   });
 
   test('401 becomes a readable error', () async {
     final c = BridgeClient(
-        baseUrl: 'http://h:1', token: 'x', client: MockClient((_) async => http.Response('', 401)));
+        baseUrl: 'https://h:1', token: 'x', client: MockClient((_) async => http.Response('', 401)));
     expect(c.health(), throwsA(isA<BridgeException>()));
   });
 }
@@ -35,7 +36,7 @@ void inboxTests() {
   test('split posts the parts and maps 409 to a readable error', () async {
     var status = 200;
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((req) async {
         expect(req.url.path, '/transactions/x/split');
@@ -50,7 +51,7 @@ void inboxTests() {
 
   test('uncategorized parses suggestions', () async {
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((_) async => http.Response(
           '{"transactions":[{"id":"a","date":"2026-11-20","amount":-500,"payee":"Shop","account":"Checking","suggestion":{"categoryId":"c","categoryName":"Groceries","reason":"r"}},{"id":"b","date":"2026-11-19","amount":-100,"payee":"X","account":"Checking","suggestion":null}]}',
@@ -65,7 +66,7 @@ void inboxTests() {
 void syncTests() {
   test('syncStatus parses freshness and ago() formats it', () async {
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((_) async => http.Response(
           '{"accounts":[{"id":"a","name":"Checking","hoursAgo":3.2,"latestTransaction":"2026-11-23","stale":false},{"id":"b","name":"Card","hoursAgo":null,"latestTransaction":null,"stale":true}]}',
@@ -82,7 +83,7 @@ void syncTests() {
 
   test('sync returns bank errors without throwing', () async {
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((_) async => http.Response('{"ok":false,"error":"bank unreachable","accounts":[]}', 200)),
     );
@@ -95,7 +96,7 @@ void syncTests() {
 void forecastTests() {
   test('forecast and payoff parse', () async {
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((req) async {
         if (req.url.path == '/forecast') {
@@ -119,7 +120,7 @@ void balancingTests() {
   test('proposal, apply and revert round trip', () async {
     final seen = <String>[];
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((req) async {
         seen.add('${req.method} ${req.url.path}');
@@ -141,7 +142,7 @@ void balancingTests() {
   });
 
   test('a stale plan is reported readably', () async {
-    final c = BridgeClient(baseUrl: 'http://h:1', token: 't', client: MockClient((_) async => http.Response('{}', 409)));
+    final c = BridgeClient(baseUrl: 'https://h:1', token: 't', client: MockClient((_) async => http.Response('{}', 409)));
     expect(
         c.applyBalancing(BalanceProposal(id: 'x', from: 'a', to: 'b', total: 0, months: [])), throwsA(isA<BridgeException>()));
   });
@@ -151,7 +152,7 @@ void rebalanceTests() {
   test('rebalance proposal parses and apply sends the includeSavings flag', () async {
     Map<String, dynamic>? sent;
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((req) async {
         if (req.method == 'POST') {
@@ -183,7 +184,7 @@ void sweepTests() {
   test('sweep proposal parses cash check and apply sends the amount', () async {
     Map<String, dynamic>? sent;
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((req) async {
         if (req.method == 'POST') {
@@ -226,7 +227,7 @@ void offlineTests() {
     var up = true;
     final cache = _MemoryCache();
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       cache: cache,
       client: MockClient((req) async {
@@ -246,7 +247,7 @@ void offlineTests() {
 
   test('without a saved copy an unreachable bridge is an error, and writes never use the cache', () async {
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       cache: _MemoryCache(),
       client: MockClient((req) async => throw http.ClientException('down')),
@@ -255,8 +256,8 @@ void offlineTests() {
   });
 
   test('health is never answered from the saved copy', () async {
-    final cache = _MemoryCache()..map['http://h:1/health'] = CachedBody('{"apiClientVersion":"old"}', DateTime(2026));
-    final c = BridgeClient(baseUrl: 'http://h:1', token: 't', cache: cache, client: MockClient((req) async => throw http.ClientException('down')));
+    final cache = _MemoryCache()..map['https://h:1/health'] = CachedBody('{"apiClientVersion":"old"}', DateTime(2026));
+    final c = BridgeClient(baseUrl: 'https://h:1', token: 't', cache: cache, client: MockClient((req) async => throw http.ClientException('down')));
     expect(c.health(), throwsA(isA<BridgeException>()));
   });
 }
@@ -264,7 +265,7 @@ void offlineTests() {
 void recoveryTests() {
   test('recovery parses months and totals', () async {
     final c = BridgeClient(
-      baseUrl: 'http://h:1',
+      baseUrl: 'https://h:1',
       token: 't',
       client: MockClient((req) async => http.Response(
           '{"months":[{"month":"2026-10","complete":true,"extra":5000,"applied":3000,"overspent":4500},{"month":"2026-11","complete":false,"extra":0,"applied":0,"overspent":4000}],"totalExtra":5000,"applied":3000,"poolRemaining":2000,"overspentNow":4000,"leftToRecover":2000}',
@@ -274,5 +275,68 @@ void recoveryTests() {
     expect(r.leftToRecover, 2000);
     expect(r.months.last.complete, isFalse);
     expect(r.months.first.overspent, 4500);
+  });
+}
+
+void securityTests() {
+  test('only https addresses are accepted, and they are tidied up', () {
+    expect(BridgeClient.checkAddress('https://grind.example.com/'), 'https://grind.example.com');
+    expect(BridgeClient.checkAddress(' https://grind.example.com:8443 '), 'https://grind.example.com:8443');
+    for (final bad in ['http://grind.example.com', 'grind.example.com', 'ftp://x.y', 'https://', 'https://u:p@x.y', 'https://x.y/?a=1', '']) {
+      expect(() => BridgeClient.checkAddress(bad), throwsA(isA<BridgeException>()), reason: bad);
+    }
+    expect(BridgeClient.checkAddress('http://localhost:8787', allowInsecure: true), 'http://localhost:8787');
+  });
+
+  test('a client never sends the token over plain http unless insecure is explicitly allowed', () async {
+    var sent = false;
+    final c = BridgeClient(baseUrl: 'http://h:1', token: 't', client: MockClient((req) async {
+      sent = true;
+      return http.Response('{"entries":[]}', 200);
+    }));
+    await expectLater(c.balancingLog(), throwsA(isA<BridgeException>()));
+    await expectLater(c.revertBalancing('x'), throwsA(isA<BridgeException>()));
+    expect(sent, isFalse);
+  });
+
+  test('redirects are not followed and are reported', () async {
+    bool? follow;
+    final c = BridgeClient(baseUrl: 'https://h:1', token: 't', client: MockClient((req) async {
+      follow = req.followRedirects;
+      return http.Response('', 302, headers: {'location': 'https://elsewhere.example/'});
+    }));
+    await expectLater(c.balancingLog(), throwsA(predicate((e) => e is BridgeException && e.message.contains('redirected'))));
+    expect(follow, isFalse);
+  });
+
+  test('Cloudflare Access headers are sent only when configured, and a 403 is explained', () async {
+    Map<String, String>? seen;
+    final withAccess = BridgeClient(baseUrl: 'https://h:1', token: 't', accessId: 'id.access', accessSecret: 'sec', client: MockClient((req) async {
+      seen = req.headers;
+      return http.Response('{"entries":[]}', 200);
+    }));
+    await withAccess.balancingLog();
+    expect(seen!['CF-Access-Client-Id'], 'id.access');
+    expect(seen!['CF-Access-Client-Secret'], 'sec');
+    expect(seen!['Authorization'], 'Bearer t');
+
+    final plain = BridgeClient(baseUrl: 'https://h:1', token: 't', client: MockClient((req) async {
+      seen = req.headers;
+      return http.Response('', 403);
+    }));
+    await expectLater(plain.balancingLog(), throwsA(predicate((e) => e is BridgeException && e.message.contains('Access'))));
+    expect(seen!.containsKey('CF-Access-Client-Id'), isFalse);
+  });
+
+  test('health without a version means the token was not accepted', () async {
+    final c = BridgeClient(baseUrl: 'https://h:1', token: 'wrong', client: MockClient((req) async => http.Response('{"ok":true}', 200)));
+    await expectLater(c.health(), throwsA(predicate((e) => e is BridgeException && e.message == 'Token rejected')));
+  });
+
+  test('an address or redirect problem is reported, not mistaken for being offline', () async {
+    final cache = _MemoryCache()..map['https://h:1/balancing/log'] = CachedBody('{"entries":[]}', DateTime(2026));
+    final c = BridgeClient(baseUrl: 'https://h:1', token: 't', cache: cache, client: MockClient((req) async => http.Response('', 302)));
+    await expectLater(c.balancingLog(), throwsA(isA<BridgeException>()));
+    expect(c.offlineSince.value, isNull);
   });
 }
