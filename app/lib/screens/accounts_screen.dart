@@ -1,13 +1,16 @@
 import 'package:flutter/material.dart';
 
 import '../data/bridge_client.dart';
+import '../widgets/states.dart';
+import 'settings_screen.dart';
 import '../data/models.dart';
 
 class AccountsScreen extends StatefulWidget {
-  const AccountsScreen({super.key, required this.client, this.onStaleChanged, this.onSynced});
+  const AccountsScreen({super.key, required this.client, this.onStaleChanged, this.onSynced, this.onDisconnect});
   final BridgeClient client;
   final ValueChanged<int>? onStaleChanged;
   final VoidCallback? onSynced;
+  final VoidCallback? onDisconnect;
   @override
   State<AccountsScreen> createState() => _AccountsScreenState();
 }
@@ -61,6 +64,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
     return Scaffold(
       appBar: AppBar(title: const Text('Accounts'), actions: [
         IconButton(onPressed: _syncing ? null : _load, icon: const Icon(Icons.refresh)),
+        IconButton(
+          tooltip: 'Settings',
+          icon: const Icon(Icons.settings),
+          onPressed: () => Navigator.of(context).push(MaterialPageRoute(
+              builder: (_) => SettingsScreen(client: widget.client, onDisconnect: widget.onDisconnect ?? () {}))),
+        ),
       ]),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _syncing ? null : _sync,
@@ -70,10 +79,12 @@ class _AccountsScreenState extends State<AccountsScreen> {
         label: Text(_syncing ? 'Syncing...' : 'Sync now'),
       ),
       body: _error != null
-          ? Center(child: Text(_error!))
+          ? ErrorView(message: _error!, onRetry: _load)
           : accounts == null
               ? const Center(child: CircularProgressIndicator())
-              : ListView(children: [
+              : accounts.isEmpty
+                  ? const EmptyView(icon: Icons.account_balance, message: 'No accounts found')
+                  : ListView(children: [
                   for (final a in accounts)
                     ListTile(
                       leading: Icon(a.stale ? Icons.warning_amber : Icons.check_circle_outline,

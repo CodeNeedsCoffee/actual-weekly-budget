@@ -37,3 +37,11 @@ Moves free budget into the Savings category. "Free" is spare balance left after 
 - `GET /sweep/proposal?month=&amount=` previews (defaults to the month that just ended and all free money; `amount` in cents is capped at what is free). It includes a cash check: the 14-day forecast low without income, minus the amount, against the buffer.
 - `POST /sweep/apply { id, month, amount? }` writes it (id must match the preview). It is logged, and `POST /balancing/revert` undoes it.
 - Budgets are plans, not cash. The cash check warns when moving that much real money to the Savings account could leave Checking under the buffer.
+
+## Recovery tracker
+`GET /recovery?from=` (defaults to `balancingFrom`) returns, per month from `from` to the current month, the running overspend, the extra income received and the amount applied, plus totals: `poolRemaining` (extra income not yet used), `overspentNow`, and `leftToRecover` (what is still overspent after the unused extra income is counted). The current month's extra income is not counted until the month ends. The Month end tab shows it as the top card.
+
+## App behaviour
+- The app opens straight into the tabs when a bridge address and token are saved (Settings > Change bridge or token clears them).
+- Reads are saved on the phone. When the bridge cannot be reached the last saved answer is shown with an "Offline" banner; writes (apply, sync, categorize) always need the bridge. The saved copy is cleared when the connection is changed.
+- Settings (Accounts tab, gear icon): theme (system, light, dark).

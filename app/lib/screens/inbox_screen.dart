@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/bridge_client.dart';
+import '../widgets/states.dart';
 import '../data/models.dart';
 
 class InboxScreen extends StatefulWidget {
@@ -77,11 +78,11 @@ class _InboxScreenState extends State<InboxScreen> {
         actions: [IconButton(onPressed: _load, icon: const Icon(Icons.refresh))],
       ),
       body: _error != null
-          ? Center(child: Text(_error!))
+          ? ErrorView(message: _error!, onRetry: _load)
           : items == null
               ? const Center(child: CircularProgressIndicator())
               : items.isEmpty
-                  ? const Center(child: Text('Nothing to categorize'))
+                  ? const EmptyView(icon: Icons.check_circle_outline, message: 'Everything is categorized')
                   : ListView(children: [for (final t in items) _tile(t)]),
     );
   }

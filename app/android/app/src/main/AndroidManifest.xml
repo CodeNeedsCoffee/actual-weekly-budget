@@ -1,6 +1,6 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <application
-        android:label="weekly_budget"
+        android:label="Weekly Budget"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
         <activity

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/bridge_client.dart';
+import '../widgets/states.dart';
 import '../data/models.dart';
 
 class BalanceScreen extends StatefulWidget {
@@ -13,6 +14,7 @@ class BalanceScreen extends StatefulWidget {
 
 class _BalanceScreenState extends State<BalanceScreen> {
   BalanceProposal? _proposal;
+  Recovery? _recovery;
   RebalanceProposal? _rebalance;
   SweepProposal? _sweep;
   int? _sweepAmount; // cents; null = all free money
@@ -35,12 +37,14 @@ class _BalanceScreenState extends State<BalanceScreen> {
         widget.client.balancingLog(),
         widget.client.rebalanceProposal(includeSavings: _includeSavings),
         widget.client.sweepProposal(amount: _sweepAmount),
+        widget.client.recovery(),
       ]);
       setState(() {
         _proposal = results[0] as BalanceProposal;
         _log = (results[1] as List<BalanceLogEntry>).reversed.toList();
         _rebalance = results[2] as RebalanceProposal;
         _sweep = results[3] as SweepProposal;
+        _recovery = results[4] as Recovery;
         _error = null;
       });
     } on BridgeException catch (e) {
@@ -121,6 +125,35 @@ class _BalanceScreenState extends State<BalanceScreen> {
         ),
       );
 
+  Widget _recoveryCard(BuildContext context, Recovery r) {
+    final done = r.overspentNow == 0;
+    final style = Theme.of(context).textTheme;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(done ? 'Recovery' : 'Left to recover', style: style.titleMedium),
+          Text(done ? 'Back on budget' : money(r.leftToRecover), style: style.headlineMedium),
+          Text(done
+              ? 'Nothing is overspent right now.'
+              : r.leftToRecover == 0
+                  ? 'Unspent extra income covers what is overspent.'
+                  : 'Still to cover with bonus money or transfers.'),
+          const SizedBox(height: 8),
+          Text('Overspent now: ${money(r.overspentNow)}'),
+          Text('Extra income applied: ${money(r.applied)}'),
+          Text('Extra income not yet used: ${money(r.poolRemaining)}'),
+          const SizedBox(height: 8),
+          for (final m in r.months)
+            Row(children: [
+              Expanded(child: Text(m.complete ? m.month : '${m.month} (so far)', style: style.bodySmall)),
+              Text(m.overspent == 0 ? 'on budget' : 'over ${money(m.overspent)}', style: style.bodySmall),
+            ]),
+        ]),
+      ),
+    );
+  }
+
   Future<void> _applySweep(SweepProposal s) async {
     final unsafe = s.cash != null && !s.cash!.safe;
     final ok = await _confirm('Move ${money(s.total)} to Savings?',
@@ -190,10 +223,11 @@ class _BalanceScreenState extends State<BalanceScreen> {
         IconButton(onPressed: _busy ? null : _load, icon: const Icon(Icons.refresh)),
       ]),
       body: _error != null
-          ? Center(child: Text(_error!))
+          ? ErrorView(message: _error!, onRetry: _load)
           : p == null
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [
+                  if (_recovery != null) _recoveryCard(context, _recovery!),
                   Card(
                     child: Padding(
                       padding: const EdgeInsets.all(16),

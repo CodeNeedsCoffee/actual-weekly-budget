@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/bridge_client.dart';
+import '../widgets/states.dart';
 import '../data/models.dart';
 
 class ForecastScreen extends StatefulWidget {
@@ -46,7 +47,7 @@ class _ForecastScreenState extends State<ForecastScreen> {
         IconButton(onPressed: _load, icon: const Icon(Icons.refresh)),
       ]),
       body: _error != null
-          ? Center(child: Text(_error!))
+          ? ErrorView(message: _error!, onRetry: _load)
           : fc == null
               ? const Center(child: CircularProgressIndicator())
               : ListView(padding: const EdgeInsets.all(16), children: [

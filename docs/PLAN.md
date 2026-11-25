@@ -71,7 +71,7 @@ Each milestone ends with tests green and something usable. Order puts the "can I
 | M4 | Refresh imports + staleness (Feature 4) | Button triggers sync; stale accounts flagged |
 | M5 | 14-day forecast + AMEX advisor (Feature 7, section 3.8) | Matches the hand analysis (low point, card payoff advice) |
 | M6 | Balancing helper + extra-income pool + revert (Features 5, 6) | Dry run reproduces a hand-verified plan; apply and revert work |
-| M7 | Recovery tracker, savings sweep, polish (themes, empty/error states, offline cache, app icon) | End-to-end week of daily use |
+| M7 (done) | Recovery tracker, savings sweep, polish (themes, empty/error states, offline cache, app icon) | End-to-end week of daily use |
 | M8 | Packaging: release APK, bridge image on the home server (compose), Tugtainer-managed, backup and restore notes | Installed on the phone, bridge running on server |
 
 ## 6. Testing

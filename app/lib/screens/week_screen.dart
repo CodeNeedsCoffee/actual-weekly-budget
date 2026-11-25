@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../data/bridge_client.dart';
+import '../widgets/states.dart';
 import '../data/models.dart';
 
 class WeekScreen extends StatefulWidget {
@@ -26,8 +27,9 @@ class _WeekScreenState extends State<WeekScreen> {
             if (snap.connectionState != ConnectionState.done) {
               return const Center(child: CircularProgressIndicator());
             }
-            if (snap.hasError) return Center(child: Text('${snap.error}'));
+            if (snap.hasError) return ErrorView(message: '${snap.error}', onRetry: _refresh);
             final cats = snap.data!;
+            if (cats.isEmpty) return const EmptyView(icon: Icons.event_available, message: 'No budget categories this week');
             return ListView(children: [
               for (final c in cats)
                 ListTile(

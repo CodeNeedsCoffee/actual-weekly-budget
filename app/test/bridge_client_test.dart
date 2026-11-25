@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:weekly_budget/data/bridge_client.dart';
+import 'package:weekly_budget/data/cache.dart';
 import 'package:weekly_budget/data/models.dart';
 
 void main() {
@@ -12,6 +13,8 @@ void main() {
   balancingTests();
   rebalanceTests();
   sweepTests();
+  offlineTests();
+  recoveryTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
@@ -205,5 +208,71 @@ void sweepTests() {
   test('sweep history entries show the moved amount', () {
     final e = BalanceLogEntry.fromJson({'id': 'a', 'at': '2026-11-25T00:00:00Z', 'kind': 'sweep', 'used': {}, 'moved': 345039, 'cells': 23});
     expect(e.total, 345039);
+  });
+}
+
+class _MemoryCache implements ResponseCache {
+  final map = <String, CachedBody>{};
+  @override
+  Future<void> put(String key, String body) async => map[key] = CachedBody(body, DateTime(2026, 11, 24));
+  @override
+  Future<CachedBody?> get(String key) async => map[key];
+  @override
+  Future<void> clear() async => map.clear();
+}
+
+void offlineTests() {
+  test('reads fall back to the saved copy when the bridge is unreachable, and clear the flag when it returns', () async {
+    var up = true;
+    final cache = _MemoryCache();
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      cache: cache,
+      client: MockClient((req) async {
+        if (!up) throw http.ClientException('down');
+        return http.Response('{"entries":[]}', 200);
+      }),
+    );
+    await c.balancingLog();
+    expect(c.offlineSince.value, isNull);
+    up = false;
+    expect(await c.balancingLog(), isEmpty);
+    expect(c.offlineSince.value, DateTime(2026, 11, 24));
+    up = true;
+    await c.balancingLog();
+    expect(c.offlineSince.value, isNull);
+  });
+
+  test('without a saved copy an unreachable bridge is an error, and writes never use the cache', () async {
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      cache: _MemoryCache(),
+      client: MockClient((req) async => throw http.ClientException('down')),
+    );
+    expect(c.balancingLog(), throwsA(isA<BridgeException>()));
+  });
+
+  test('health is never answered from the saved copy', () async {
+    final cache = _MemoryCache()..map['http://h:1/health'] = CachedBody('{"apiClientVersion":"old"}', DateTime(2026));
+    final c = BridgeClient(baseUrl: 'http://h:1', token: 't', cache: cache, client: MockClient((req) async => throw http.ClientException('down')));
+    expect(c.health(), throwsA(isA<BridgeException>()));
+  });
+}
+
+void recoveryTests() {
+  test('recovery parses months and totals', () async {
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((req) async => http.Response(
+          '{"months":[{"month":"2026-10","complete":true,"extra":5000,"applied":3000,"overspent":4500},{"month":"2026-11","complete":false,"extra":0,"applied":0,"overspent":4000}],"totalExtra":5000,"applied":3000,"poolRemaining":2000,"overspentNow":4000,"leftToRecover":2000}',
+          200)),
+    );
+    final r = await c.recovery();
+    expect(r.leftToRecover, 2000);
+    expect(r.months.last.complete, isFalse);
+    expect(r.months.first.overspent, 4500);
   });
 }

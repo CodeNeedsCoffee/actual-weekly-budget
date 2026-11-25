@@ -255,3 +255,24 @@ test('sweep: previews free money with a cash check, applies once, and is reversi
   assert.equal((await get('/balancing/log')).json().entries[0].kind, 'sweep');
   assert.equal((await get('/sweep/proposal?amount=-5')).statusCode, 400);
 });
+
+test('recovery: running overspend per month and what is left to recover', async () => {
+  const log = createLog(join(mkdtempSync(join(tmpdir(), 'rc-')), 'log.json'));
+  log.add({ id: 'manual-1', at: 'x', kind: 'manual', used: { '2026-10': 1000 }, cells: [] });
+  const a = buildApp({
+    token: 'tok1',
+    balancingLog: log,
+    forecastConfig: { balancingFrom: '2026-10' },
+    actual: {
+      ...fake,
+      today: () => '2026-11-24',
+      balancingMonths: async (months) => months.map((mo, i) => ({ month: mo, surplus: i === 0 ? 5000 : 0, cats: [{ id: 'c1', name: 'Groceries', budgeted: 1, balance: -4000, carryover: true }] })),
+    },
+  });
+  const r = (await a.inject({ method: 'GET', url: '/recovery', headers: auth })).json();
+  assert.deepEqual(r.months.map((x) => x.month), ['2026-10', '2026-11']);
+  assert.equal(r.poolRemaining, 4000);
+  assert.equal(r.overspentNow, 4000);
+  assert.equal(r.leftToRecover, 0);
+  assert.equal((await a.inject({ method: 'GET', url: '/recovery?from=2027-01', headers: auth })).statusCode, 400);
+});

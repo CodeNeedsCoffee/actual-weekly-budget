@@ -10,6 +10,7 @@ import { findAccount } from './forecast_config.js';
 import { planExtraIncome, planId } from './balancing.js';
 import { planRebalance } from './rebalance.js';
 import { planSweep } from './sweep.js';
+import { recoverySummary } from './recovery.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -199,6 +200,16 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
     const entry = { id: `rebalance-${Date.now()}`, at: new Date().toISOString(), kind: 'rebalance', used: {}, moved: plan.total, cells: plan.cells };
     balancingLog.add(entry);
     return { ok: true, applied: plan.cells.length, total: plan.total, logId: entry.id };
+  });
+
+  // ---- Recovery tracker: remaining overspend, extra income applied, what is left to recover ----
+  app.get('/recovery', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const from = req.query.from || fcfg.balancingFrom;
+    const to = actual.today().slice(0, 7);
+    if (!monthOk(from) || from > to) return reply.code(400).send({ error: 'from must be YYYY-MM (set balancingFrom in the config)' });
+    const months = await actual.balancingMonths(monthsBetween(from, to), incomeOpts);
+    return { from, to, ...recoverySummary({ months, used: balancingLog.used() }) };
   });
 
   // ---- Savings sweep: move free budget (left after overspent categories are covered) into Savings ----
