@@ -34,3 +34,5 @@ google-services.json
 .DS_Store
 split-rules*.json
 !split-rules.example.json
+forecast-config*.json
+!forecast-config.example.json

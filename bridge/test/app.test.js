@@ -21,6 +21,16 @@ const fake = {
   splitTransaction: async (id, parts) => (id === 'gone' ? { error: 'not found' } : id === 'done' ? { error: 'already split' } : (fake.split = [id, parts], { ok: true })),
   syncStatus: async () => [{ id: 'a1', name: 'Checking', lastSync: '2026-11-24T00:00:00.000Z', hoursAgo: 3, latestTransaction: '2026-11-23', stale: false }],
   runSync: async (accountId) => (accountId === 'bad' ? { ok: false, error: 'bank unreachable' } : { ok: true }),
+  forecastInputs: async () => ({
+    accounts: [
+      { id: 'chk', name: '360 Checking', balance: 800000 },
+      { id: 'sav', name: 'Performance Savings', balance: 200000 },
+      { id: 'card', name: 'Big Card', balance: -500000 },
+    ],
+    schedules: [
+      { id: 's1', name: 'Rent', accountId: 'chk', amount: -330000, op: 'is', dateCfg: { start: '2026-12-01', frequency: 'monthly', patterns: [], endMode: 'never' }, nextDate: '2026-12-01', completed: false },
+    ],
+  }),
   setCategory: async (id, categoryId) => { fake.last = [id, categoryId]; },
   categories: async () => [{ id: 'c1', name: 'Groceries', group: 'Food', balance: 8000, spentThisWeek: 1000 }],
 };
@@ -121,4 +131,19 @@ test('sync status and a sync run return per-account freshness', async () => {
   const bad = await a.inject({ method: 'POST', url: '/sync', headers: auth, payload: { accountId: 'bad' } });
   assert.equal(bad.json().ok, false);
   assert.match(bad.json().error, /unreachable/);
+});
+
+test('forecast and payoff endpoints use the configured account names', async () => {
+  const a = buildApp({ token: 'tok1', actual: fake, forecastConfig: { payoffCard: 'big card', buffer: 100000 } });
+  const f = await a.inject({ method: 'GET', url: '/forecast', headers: auth });
+  assert.equal(f.statusCode, 200);
+  assert.equal(f.json().startBalance, 800000);
+  assert.equal(f.json().path.length, 15);
+  assert.equal(f.json().lowWithoutIncome.amount, 470000);
+  const p = await a.inject({ method: 'GET', url: '/payoff', headers: auth });
+  assert.equal(p.json().cardOwed, 500000);
+  assert.equal(p.json().safeNow, 370000);
+  assert.equal(p.json().incomeLateDays, 7);
+  const noCard = await app().inject({ method: 'GET', url: '/payoff', headers: auth });
+  assert.equal(noCard.statusCode, 422);
 });

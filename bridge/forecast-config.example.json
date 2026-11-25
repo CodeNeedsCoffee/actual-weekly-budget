@@ -1,0 +1,11 @@
+{
+  "checking": "checking",
+  "savings": "saving",
+  "payoffCard": "card",
+  "buffer": 100000,
+  "variablePerDay": 5000,
+  "items": [
+    { "name": "Payroll (estimate)", "amount": 300000, "dayOfMonth": [14, 29] },
+    { "name": "Phone (not scheduled)", "amount": -35000, "dayOfMonth": [28] }
+  ]
+}

@@ -128,6 +128,31 @@ export async function readSyncStatus(client, nowMs) {
   return out;
 }
 
+// Everything the forecast needs: account balances and normalized schedules.
+export async function readForecastInputs(client) {
+  const accounts = [];
+  for (const a of await client.getAccounts()) {
+    if (a.closed || a.offbudget) continue;
+    accounts.push({ id: a.id, name: a.name, balance: await client.getAccountBalance(a.id) });
+  }
+  const { data } = await client.runQuery(
+    client
+      .q('schedules')
+      .select(['id', 'name', 'next_date', '_account', '_amount', '_amountOp', '_date', 'completed', '_payee']),
+  );
+  const schedules = data.map((s) => ({
+    id: s.id,
+    name: s.name || '(unnamed)',
+    accountId: s._account,
+    amount: s._amount,
+    op: s._amountOp,
+    dateCfg: s._date,
+    nextDate: s.next_date,
+    completed: !!s.completed,
+  }));
+  return { accounts, schedules };
+}
+
 // Thin adapter over @actual-app/api. The client version must match the server.
 export async function createActual(cfg) {
   await api.init({
@@ -163,6 +188,7 @@ export async function createActual(cfg) {
         return { ok: false, error: String(e?.message ?? e) };
       }
     },
+    forecastInputs: () => readForecastInputs(api),
     close: () => api.shutdown(),
   };
 }

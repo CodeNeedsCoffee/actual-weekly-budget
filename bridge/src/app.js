@@ -5,6 +5,8 @@ import { affordCheck } from './afford.js';
 import { suggestCategory } from './suggest.js';
 import { splitActions } from './splits.js';
 import { splitSuggestionFor } from './split_rules.js';
+import { forecast, payoffAdvice } from './forecast.js';
+import { findAccount } from './forecast_config.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -13,7 +15,8 @@ function tokenMatches(given, expected) {
 }
 
 // `actual` is an adapter around @actual-app/api so routes can be tested with a fake.
-export function buildApp({ token, actual, splitRules = [], logger = false }) {
+export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, logger = false }) {
+  const fcfg = { checking: 'checking', savings: 'saving', payoffCard: '', buffer: 100000, variablePerDay: 0, items: [], ...forecastConfig };
   const app = Fastify({ logger });
 
   app.addHook('onRequest', async (req, reply) => {
@@ -76,6 +79,49 @@ export function buildApp({ token, actual, splitRules = [], logger = false }) {
     } finally {
       syncing = false;
     }
+  });
+
+  async function runForecast(days, { amountMode = 'worst', incomeDelayDays = 0 } = {}) {
+    const { accounts, schedules } = await actual.forecastInputs();
+    const checking = findAccount(accounts, fcfg.checking);
+    if (!checking) return { error: 'checking account not found (set "checking" in the forecast config)' };
+    const savings = findAccount(accounts, fcfg.savings);
+    const fc = forecast({
+      today: actual.today(),
+      days,
+      checkingBalance: checking.balance,
+      savingsBalance: savings?.balance ?? 0,
+      checkingId: checking.id,
+      schedules,
+      adjustments: { variablePerDay: fcfg.variablePerDay, items: fcfg.items },
+      buffer: fcfg.buffer,
+      amountMode,
+      incomeDelayDays,
+    });
+    return { fc, accounts };
+  }
+
+  // 14-day (default) cash forecast for Checking. `fc.path` has balances with and without income.
+  app.get('/forecast', async (req, reply) => {
+    const days = Math.min(60, Math.max(1, Number(req.query.days ?? 14)));
+    if (!Number.isInteger(days)) return reply.code(400).send({ error: 'days must be a whole number' });
+    const r = await runForecast(days);
+    if (r.error) return reply.code(422).send({ error: r.error });
+    return r.fc;
+  });
+
+  // How much of the card balance can be paid from Checking now (looks 21 days ahead).
+  app.get('/payoff', async (req, reply) => {
+    const onTime = await runForecast(21, { amountMode: 'expected' });
+    if (onTime.error) return reply.code(422).send({ error: onTime.error });
+    const late = await runForecast(21, { amountMode: 'expected', incomeDelayDays: fcfg.incomeLateDays ?? 7 });
+    const card = findAccount(onTime.accounts, fcfg.payoffCard);
+    if (!card) return reply.code(422).send({ error: 'card account not found (set "payoffCard" in the forecast config)' });
+    return {
+      card: card.name,
+      incomeLateDays: fcfg.incomeLateDays ?? 7,
+      ...payoffAdvice(onTime.fc, late.fc, Math.max(0, -card.balance)),
+    };
   });
 
   app.get('/categories', async () => ({ categories: await actual.listCategories() }));

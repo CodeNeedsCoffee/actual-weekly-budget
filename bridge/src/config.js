@@ -13,5 +13,6 @@ export function loadConfig(env = process.env) {
     budgetId: need('ACTUAL_BUDGET_ID'),
     dataDir: env.DATA_DIR ?? './data',
     splitRulesFile: env.SPLIT_RULES_FILE ?? '',
+    forecastConfigFile: env.FORECAST_CONFIG_FILE ?? '',
   };
 }
