@@ -8,6 +8,7 @@ import { splitSuggestionFor } from './split_rules.js';
 import { forecast, payoffAdvice } from './forecast.js';
 import { findAccount } from './forecast_config.js';
 import { planExtraIncome, planId } from './balancing.js';
+import { planRebalance } from './rebalance.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -154,6 +155,47 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
     return monthOk(from) && monthOk(to) && from <= to ? { from, to } : null;
   };
 
+  // ---- Zero-sum rebalance: move spare budget into overspent categories (Savings only if asked, last) ----
+  async function buildRebalance(from, to, includeSavings) {
+    const savings = (fcfg.savingsCategory ?? 'Savings').toLowerCase();
+    const protectedNames = new Set((fcfg.protect ?? []).map((n) => n.toLowerCase()));
+    const months = (await actual.balancingMonths(monthsBetween(from, to), incomeOpts)).map((m) => ({
+      month: m.month,
+      cats: m.cats.map((c) => ({
+        ...c,
+        isSavings: c.name.toLowerCase() === savings,
+        protected: protectedNames.has(c.name.toLowerCase()),
+      })),
+    }));
+    const plan = planRebalance({ months, includeSavings });
+    return { ...plan, id: planId(plan.cells), from, to, includeSavings };
+  }
+  const rebalanceRange = (src) => {
+    const to = src.to || lastFullMonth();
+    const from = src.from || to; // the month that just ended, unless a range is given
+    return monthOk(from) && monthOk(to) && from <= to ? { from, to } : null;
+  };
+
+  app.get('/rebalance/proposal', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const r = rebalanceRange(req.query);
+    if (!r) return reply.code(400).send({ error: 'from/to must be YYYY-MM' });
+    return buildRebalance(r.from, r.to, req.query.includeSavings === '1');
+  });
+
+  app.post('/rebalance/apply', async (req, reply) => {
+    if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
+    const r = rebalanceRange(req.body ?? {});
+    if (!r) return reply.code(400).send({ error: 'from/to must be YYYY-MM' });
+    const plan = await buildRebalance(r.from, r.to, req.body?.includeSavings === true);
+    if (req.body?.id !== plan.id) return reply.code(409).send({ error: 'plan changed since the preview', id: plan.id });
+    if (plan.cells.length === 0) return { ok: true, applied: 0 };
+    for (const c of plan.cells) await actual.setBudget(c.month, c.categoryId, c.to);
+    const entry = { id: `rebalance-${Date.now()}`, at: new Date().toISOString(), kind: 'rebalance', used: {}, moved: plan.total, cells: plan.cells };
+    balancingLog.add(entry);
+    return { ok: true, applied: plan.cells.length, total: plan.total, logId: entry.id };
+  });
+
   app.get('/balancing/proposal', async (req, reply) => {
     if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
     const r = range(req.query);
@@ -190,7 +232,7 @@ export function buildApp({ token, actual, splitRules = [], forecastConfig = {}, 
 
   app.get('/balancing/log', async (req, reply) => {
     if (!balancingLog) return reply.code(501).send({ error: 'balancing is not enabled' });
-    return { entries: balancingLog.entries().map((e) => ({ id: e.id, at: e.at, kind: e.kind, used: e.used, cells: e.cells.length })) };
+    return { entries: balancingLog.entries().map((e) => ({ id: e.id, at: e.at, kind: e.kind, used: e.used, moved: e.moved ?? 0, cells: e.cells.length })) };
   });
 
   // Restores the previous budget amounts. A cell someone has changed since is left alone and reported.

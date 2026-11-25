@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
@@ -9,6 +10,7 @@ void main() {
   syncTests();
   forecastTests();
   balancingTests();
+  rebalanceTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
@@ -138,5 +140,37 @@ void balancingTests() {
     final c = BridgeClient(baseUrl: 'http://h:1', token: 't', client: MockClient((_) async => http.Response('{}', 409)));
     expect(
         c.applyBalancing(BalanceProposal(id: 'x', from: 'a', to: 'b', total: 0, months: [])), throwsA(isA<BridgeException>()));
+  });
+}
+
+void rebalanceTests() {
+  test('rebalance proposal parses and apply sends the includeSavings flag', () async {
+    Map<String, dynamic>? sent;
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((req) async {
+        if (req.method == 'POST') {
+          sent = jsonDecode(req.body) as Map<String, dynamic>;
+          return http.Response('{"ok":true}', 200);
+        }
+        expect(req.url.queryParameters['includeSavings'], '1');
+        return http.Response(
+            '{"id":"r1","from":"2026-10","to":"2026-10","includeSavings":true,"total":300000,"moves":[{"month":"2026-10","from":"Groceries","to":"Shopping","amount":300000}],"overspentAfter":[{"month":"2026-10","amount":-120000}],"cells":[]}',
+            200);
+      }),
+    );
+    final p = await c.rebalanceProposal(includeSavings: true);
+    expect(p.total, 300000);
+    expect(p.moves.single.to, 'Shopping');
+    expect(p.overspentAfter, -120000);
+    await c.applyRebalance(p);
+    expect(sent!['includeSavings'], true);
+    expect(sent!['id'], 'r1');
+  });
+
+  test('history shows moved amount for rebalance entries', () {
+    final e = BalanceLogEntry.fromJson({'id': 'a', 'at': '2026-11-25T00:00:00Z', 'kind': 'rebalance', 'used': {}, 'moved': 4200, 'cells': 3});
+    expect(e.total, 4200);
   });
 }

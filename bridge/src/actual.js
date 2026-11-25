@@ -188,7 +188,7 @@ export async function createActual(cfg) {
   const pkg = JSON.parse(
     readFileSync(new URL('../node_modules/@actual-app/api/package.json', import.meta.url)),
   );
-  return {
+  const adapter = {
     clientVersion: () => pkg.version,
     summary: async () => {
       const accounts = await api.getAccounts();
@@ -217,4 +217,21 @@ export async function createActual(cfg) {
     setBudget: (month, categoryId, cents) => api.setBudgetAmount(month, categoryId, cents),
     close: () => api.shutdown(),
   };
+  // The bridge keeps a local copy of the budget. Pull changes made elsewhere (the Actual app, another
+  // client) before every read, at most once every few seconds, so answers are never stale.
+  let lastPull = 0;
+  const fresh = async () => {
+    if (Date.now() - lastPull > 3000) {
+      await api.sync();
+      lastPull = Date.now();
+    }
+  };
+  for (const name of ['summary', 'categories', 'listCategories', 'uncategorized', 'history', 'syncStatus', 'forecastInputs', 'balancingMonths']) {
+    const original = adapter[name];
+    adapter[name] = async (...args) => {
+      await fresh();
+      return original(...args);
+    };
+  }
+  return adapter;
 }

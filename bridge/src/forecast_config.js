@@ -10,6 +10,8 @@ const DEFAULTS = {
   balancingFrom: '', // first month (YYYY-MM) the month-end helper looks at
   baseIncome: {}, // optional { incomeCategoryName: cents } overriding the budgeted income base
   excludeIncome: ['starting balances'],
+  savingsCategory: 'Savings', // the category money is taken from last, and only when asked
+  protect: [], // category names the rebalance never takes from (rent, bills due soon)
   items: [], // estimates for things Actual has no schedule for: { name, amount, dayOfMonth: [..] }
 };
 

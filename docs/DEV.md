@@ -24,3 +24,10 @@ Config keys (same file as the forecast): `balancingFrom` (first month, `YYYY-MM`
 - `POST /balancing/apply { id, from, to }` writes it. The id must match the preview, so a changed plan is refused (409).
 - Applied amounts are logged in the bridge data directory (`balancing-log.json`), so the same extra income is never spent twice. `POST /balancing/record { month, amount }` marks extra income already spent outside the app.
 - `POST /balancing/revert { id }` restores the previous amounts. A budget changed since is left alone and reported.
+
+## Zero-sum rebalance
+Moves budget from categories with spare balance into overspent ones, biggest deficit first. Config keys: `protect` (category names it never takes from, such as rent or bills due soon) and `savingsCategory` (default `Savings`).
+- `GET /rebalance/proposal?from=&to=&includeSavings=0|1` previews; by default it covers only the month that just ended, because a positive balance in the current month may be a bill that has not hit yet.
+- `POST /rebalance/apply { id, from, to, includeSavings }` writes it (id must match the preview). It is logged, and `POST /balancing/revert` undoes it.
+- Rules: budgets never go below zero (only Savings may, and only when `includeSavings` is on, after every other donor); a donor is limited so it is not overspent in a later month through carryover; overspent categories are never donors.
+- The bridge pulls changes from the server before reads (at most every few seconds), so edits made in the Actual app are picked up.

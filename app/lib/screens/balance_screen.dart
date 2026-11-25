@@ -13,6 +13,8 @@ class BalanceScreen extends StatefulWidget {
 
 class _BalanceScreenState extends State<BalanceScreen> {
   BalanceProposal? _proposal;
+  RebalanceProposal? _rebalance;
+  bool _includeSavings = false;
   List<BalanceLogEntry> _log = [];
   String? _error;
   bool _busy = false;
@@ -25,10 +27,15 @@ class _BalanceScreenState extends State<BalanceScreen> {
 
   Future<void> _load() async {
     try {
-      final results = await Future.wait([widget.client.balancingProposal(), widget.client.balancingLog()]);
+      final results = await Future.wait([
+        widget.client.balancingProposal(),
+        widget.client.balancingLog(),
+        widget.client.rebalanceProposal(includeSavings: _includeSavings),
+      ]);
       setState(() {
         _proposal = results[0] as BalanceProposal;
         _log = (results[1] as List<BalanceLogEntry>).reversed.toList();
+        _rebalance = results[2] as RebalanceProposal;
         _error = null;
       });
     } on BridgeException catch (e) {
@@ -70,6 +77,45 @@ class _BalanceScreenState extends State<BalanceScreen> {
     if (ok) await _run(() => widget.client.applyBalancing(p), done: 'Applied ${money(p.total)}');
   }
 
+  Future<void> _applyRebalance(RebalanceProposal r) async {
+    final ok = await _confirm('Rebalance ${r.to}?',
+        'Moves ${money(r.total)} between ${r.moves.length} budget moves. Savings ${r.includeSavings ? 'may be used, last' : 'is not touched'}. You can undo it afterwards.', 'Apply');
+    if (ok) await _run(() => widget.client.applyRebalance(r), done: 'Moved ${money(r.total)}');
+  }
+
+  Widget _rebalanceCard(BuildContext context, RebalanceProposal r) => Card(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text('Rebalance ${r.to}', style: Theme.of(context).textTheme.titleMedium),
+            if (r.total > 0) ...[
+              Text(money(r.total), style: Theme.of(context).textTheme.headlineMedium),
+              const Text('Moved from budgets with spare money into overspent ones.'),
+              const SizedBox(height: 8),
+              for (final mv in r.moves.take(6))
+                Text('${mv.from} → ${mv.to}  ${money(mv.amount)}', style: Theme.of(context).textTheme.bodySmall),
+              if (r.moves.length > 6)
+                Text('and ${r.moves.length - 6} more', style: Theme.of(context).textTheme.bodySmall),
+              const SizedBox(height: 8),
+              Text('Still overspent after: ${money(r.overspentAfter.abs())}'),
+            ] else
+              const Text('Nothing to move: no budget has spare money to cover an overspent one.'),
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              title: const Text('Also use Savings (last)'),
+              value: _includeSavings,
+              onChanged: _busy
+                  ? null
+                  : (v) {
+                      setState(() => _includeSavings = v);
+                      _load();
+                    },
+            ),
+            if (r.total > 0) FilledButton(onPressed: _busy ? null : () => _applyRebalance(r), child: const Text('Apply rebalance')),
+          ]),
+        ),
+      );
+
   Future<void> _revert(BalanceLogEntry e) async {
     final ok = await _confirm('Undo this change?', 'Restores the budget amounts from before (${money(e.total)}).', 'Undo');
     if (!ok) return;
@@ -109,6 +155,7 @@ class _BalanceScreenState extends State<BalanceScreen> {
                       ]),
                     ),
                   ),
+                  if (_rebalance != null) _rebalanceCard(context, _rebalance!),
                   for (final m in p.months)
                     ExpansionTile(
                       title: Text(m.month),
@@ -124,7 +171,7 @@ class _BalanceScreenState extends State<BalanceScreen> {
                     const Padding(padding: EdgeInsets.only(top: 16, bottom: 4), child: Text('History')),
                     for (final e in _log)
                       ListTile(
-                        title: Text('${e.kind == 'apply' ? 'Applied' : 'Recorded'} ${money(e.total)}'),
+                        title: Text('${{'apply': 'Extra income applied', 'rebalance': 'Rebalanced', 'manual': 'Recorded'}[e.kind] ?? e.kind} ${money(e.total)}'),
                         subtitle: Text(e.at.substring(0, 10)),
                         trailing: TextButton(onPressed: _busy ? null : () => _revert(e), child: const Text('Undo')),
                       ),

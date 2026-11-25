@@ -190,3 +190,36 @@ test('balancing is off without a log', async () => {
   const res = await app().inject({ method: 'GET', url: '/balancing/proposal?from=2026-08&to=2026-08', headers: auth });
   assert.equal(res.statusCode, 501);
 });
+
+test('rebalance: preview, stale id refused, apply logs a reversible entry', async () => {
+  const log = createLog(join(mkdtempSync(join(tmpdir(), 'rb-')), 'log.json'));
+  const fakeRb = {
+    ...fake,
+    today: () => '2026-11-24',
+    balancingMonths: async () => [
+      { month: '2026-10', surplus: 0, cats: [
+        { id: 'c1', name: 'Groceries', budgeted: 10000, balance: -3000, carryover: false },
+        { id: 'c2', name: 'Spare', budgeted: 10000, balance: 8000, carryover: false },
+        { id: 'c3', name: 'Rent', budgeted: 10000, balance: 9000, carryover: false },
+        { id: 'c4', name: 'Savings', budgeted: 0, balance: 5000, carryover: false },
+      ] },
+    ],
+  };
+  const a = buildApp({ token: 'tok1', actual: fakeRb, balancingLog: log, forecastConfig: { protect: ['rent'] } });
+  const get = (url) => a.inject({ method: 'GET', url, headers: auth });
+  const post = (url, payload) => a.inject({ method: 'POST', url, headers: auth, payload });
+
+  const prev = (await get('/rebalance/proposal')).json(); // defaults to the month that just ended
+  assert.equal(prev.from, '2026-10');
+  assert.deepEqual(prev.moves.map((m) => [m.from, m.to, m.amount]), [['Spare', 'Groceries', 3000]]);
+
+  assert.equal((await post('/rebalance/apply', { id: 'stale' })).statusCode, 409);
+  const done = await post('/rebalance/apply', { id: prev.id });
+  assert.equal(done.json().applied, 2);
+  assert.deepEqual(fake.budgetWrites.slice(-2).map((w) => w[2]).sort((x, y) => x - y), [7000, 13000]);
+  assert.equal((await get('/balancing/log')).json().entries[0].moved, 3000);
+  assert.equal((await get('/rebalance/proposal?from=bad')).statusCode, 400);
+
+  const withSav = (await get('/rebalance/proposal?includeSavings=1')).json();
+  assert.equal(withSav.includeSavings, true);
+});
