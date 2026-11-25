@@ -1,10 +1,10 @@
 # Deploying Weekly Grind
 
-The bridge runs as a container on the home server next to a Cloudflare tunnel (`cloudflared`). The phone reaches it over **https** through Cloudflare, from anywhere. The bridge publishes no port of its own, so nothing reaches it except through the tunnel.
+The bridge runs as a container on the home server and a Cloudflare tunnel (`cloudflared`) connects it to the internet. The phone reaches it over **https** through Cloudflare, from anywhere. The bridge is published only on the server's own loopback address (`127.0.0.1:8787`), never on the LAN, so nothing reaches it except through the tunnel.
 
 ## 1. Cloudflare (once)
 1. In Cloudflare Zero Trust, go to Networks > Tunnels, create a tunnel and copy its token.
-2. Add a public hostname to the tunnel (for example `grind.<your domain>`) with the service set to `http://bridge:8787` (the bridge container, on the compose network).
+2. Add a public hostname to the tunnel (for example `grind.<your domain>`). The service URL depends on where `cloudflared` runs: `http://localhost:8787` if it runs on the server itself (installed on the host, or a container with `network_mode: host`); `http://bridge:8787` if you use the bundled one (`docker compose --profile tunnel up -d`).
 3. **Protect the hostname with Cloudflare Access** (strongly recommended, it is a second lock in front of the token): Access > Applications > Self-hosted, for that hostname, add a policy with action **Service Auth** that allows one new **service token**. Copy the token's Client ID and Secret. The app sends them with every request (Connect screen > Cloudflare Access).
 4. Optionally add a WAF rate-limiting rule for the hostname (for example 100 requests per minute per IP).
 
@@ -15,9 +15,9 @@ The bridge runs as a container on the home server next to a Cloudflare tunnel (`
    - `ACTUAL_URL`: the Actual server's address **as the container sees it** (its LAN address, not `localhost`).
    - `ACTUAL_PASSWORD`, `ACTUAL_BUDGET_ID`: the Actual server password and the budget's sync id (Settings > Advanced).
    - `SPLIT_RULES_FILE=/config/split-rules.json`, `FORECAST_CONFIG_FILE=/config/forecast-config.json` (optional).
-3. Create `cloudflared.env` containing `TUNNEL_TOKEN=<the tunnel token>`.
+3. Only for the bundled tunnel: create `cloudflared.env` containing `TUNNEL_TOKEN=<the tunnel token>`.
 4. Put `split-rules.json` and `forecast-config.json` in a `config/` folder next to the compose file (examples in `bridge/`). They hold personal estimates, so they stay on the server.
-5. `docker compose up -d`. Check `docker compose ps` (the bridge should become `healthy`, the tunnel `running`) and, from any machine, `curl https://<your hostname>/health`. With the Access policy on you will be turned away, which is correct; test through the app.
+5. `docker compose up -d` (add `--profile tunnel` for the bundled tunnel). Check `docker compose ps` (the bridge should become `healthy`) and, from any machine, `curl https://<your hostname>/health`. With the Access policy on you will be turned away, which is correct; test through the app.
 
 The image comes from `ghcr.io/codeneedscoffee/actual-weekly-budget-bridge`, built by GitHub Actions on every change to `bridge/`. If the first pull is refused, make the package public in GitHub's package settings (the image holds no secrets), or `docker login ghcr.io`. To build on the server instead, run `docker compose build`.
 
@@ -37,7 +37,7 @@ The release app only accepts `https://` addresses: the connection carries the wh
 ## 2c. Security notes
 - **Layers:** Cloudflare (TLS, optional WAF) > Cloudflare Access service token > the bridge token (constant-time compared, 32+ characters) > a per-client lockout after 10 wrong tokens (15 minutes) and a request-rate cap.
 - **What an unauthenticated caller sees:** `/health` says only that it is up. Every other path, including ones that do not exist, answers `401`. Errors never include details. Every response carries `Cache-Control: no-store` and strict headers.
-- **The container:** non-root, read-only filesystem (only the data volume and `/tmp` are writable), all Linux capabilities dropped, no-new-privileges, memory and process limits, and no published port.
+- **The container:** non-root, read-only filesystem (only the data volume and `/tmp` are writable), all Linux capabilities dropped, no-new-privileges, memory and process limits, and published on loopback only.
 - **The phone:** the login and the offline copy are encrypted behind biometrics or the device PIN (see `docs/DEV.md`).
 - **If the token leaks:** change `BRIDGE_TOKEN` in `bridge.env`, `docker compose up -d`, and enter the new token in the app (Settings > Change bridge or token). Rotate the Access service token the same way in Cloudflare. Every change the bridge makes can be undone from the Month end tab.
 - **Still your call:** Cloudflare can see traffic that passes through its tunnel (it terminates TLS). The bridge only holds budget amounts and category names, never bank credentials.
