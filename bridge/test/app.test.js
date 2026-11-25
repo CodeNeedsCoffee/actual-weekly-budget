@@ -19,6 +19,8 @@ const fake = {
     { payee: 'Sprouts #2', categoryId: 'c1' },
   ],
   splitTransaction: async (id, parts) => (id === 'gone' ? { error: 'not found' } : id === 'done' ? { error: 'already split' } : (fake.split = [id, parts], { ok: true })),
+  syncStatus: async () => [{ id: 'a1', name: 'Checking', lastSync: '2026-11-24T00:00:00.000Z', hoursAgo: 3, latestTransaction: '2026-11-23', stale: false }],
+  runSync: async (accountId) => (accountId === 'bad' ? { ok: false, error: 'bank unreachable' } : { ok: true }),
   setCategory: async (id, categoryId) => { fake.last = [id, categoryId]; },
   categories: async () => [{ id: 'c1', name: 'Groceries', group: 'Food', balance: 8000, spentThisWeek: 1000 }],
 };
@@ -107,4 +109,16 @@ test('inbox offers a split suggestion when a split rule matches', async () => {
   const [a, b] = res.json().transactions;
   assert.equal(a.splitSuggestion, null);
   assert.deepEqual(b.splitSuggestion.parts, [{ categoryId: 'c1', percent: 50 }, { categoryId: 'c2' }]);
+});
+
+test('sync status and a sync run return per-account freshness', async () => {
+  const a = app();
+  const status = await a.inject({ method: 'GET', url: '/sync/status', headers: auth });
+  assert.equal(status.json().accounts[0].stale, false);
+  const run = await a.inject({ method: 'POST', url: '/sync', headers: auth, payload: {} });
+  assert.equal(run.json().ok, true);
+  assert.equal(run.json().accounts.length, 1);
+  const bad = await a.inject({ method: 'POST', url: '/sync', headers: auth, payload: { accountId: 'bad' } });
+  assert.equal(bad.json().ok, false);
+  assert.match(bad.json().error, /unreachable/);
 });

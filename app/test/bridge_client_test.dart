@@ -2,9 +2,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:weekly_budget/data/bridge_client.dart';
+import 'package:weekly_budget/data/models.dart';
 
 void main() {
   inboxTests();
+  syncTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
@@ -49,5 +51,35 @@ void inboxTests() {
     final items = await c.uncategorized();
     expect(items.first.suggestion?.categoryName, 'Groceries');
     expect(items.last.suggestion, isNull);
+  });
+}
+
+void syncTests() {
+  test('syncStatus parses freshness and ago() formats it', () async {
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((_) async => http.Response(
+          '{"accounts":[{"id":"a","name":"Checking","hoursAgo":3.2,"latestTransaction":"2026-11-23","stale":false},{"id":"b","name":"Card","hoursAgo":null,"latestTransaction":null,"stale":true}]}',
+          200)),
+    );
+    final a = await c.syncStatus();
+    expect(a.first.stale, isFalse);
+    expect(ago(a.first.hoursAgo), '3 h ago');
+    expect(a.last.stale, isTrue);
+    expect(ago(a.last.hoursAgo), 'never');
+    expect(ago(0.2), 'just now');
+    expect(ago(72), '3 d ago');
+  });
+
+  test('sync returns bank errors without throwing', () async {
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((_) async => http.Response('{"ok":false,"error":"bank unreachable","accounts":[]}', 200)),
+    );
+    final r = await c.sync();
+    expect(r.ok, isFalse);
+    expect(r.error, 'bank unreachable');
   });
 }

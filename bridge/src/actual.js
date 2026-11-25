@@ -1,6 +1,7 @@
 import * as api from '@actual-app/api';
 import apiCjs from '@actual-app/api';
 import { splitActions } from './splits.js';
+import { accountSyncStatus } from './sync_status.js';
 import { readFileSync } from 'node:fs';
 import { weekBounds, monthBounds } from './weekly.js';
 
@@ -99,6 +100,34 @@ export async function splitExisting(client, internal, id, parts) {
   return { ok: true };
 }
 
+// Open, on-budget accounts that use a bank sync source, with freshness info.
+export async function readSyncStatus(client, nowMs) {
+  const { data: accounts } = await client.runQuery(
+    client
+      .q('accounts')
+      .filter({ closed: false, offbudget: false })
+      .select(['id', 'name', 'last_sync', 'account_sync_source']),
+  );
+  const out = [];
+  for (const a of accounts) {
+    if (!a.account_sync_source) continue;
+    const { data } = await client.runQuery(
+      client
+        .q('transactions')
+        .filter({ account: a.id, is_child: false })
+        .orderBy({ date: 'desc' })
+        .limit(1)
+        .select(['date']),
+    );
+    out.push({
+      id: a.id,
+      name: a.name,
+      ...accountSyncStatus({ lastSync: a.last_sync, latestTransaction: data[0]?.date }, nowMs),
+    });
+  }
+  return out;
+}
+
 // Thin adapter over @actual-app/api. The client version must match the server.
 export async function createActual(cfg) {
   await api.init({
@@ -125,6 +154,15 @@ export async function createActual(cfg) {
       await api.updateTransaction(id, { category: categoryId });
     },
     splitTransaction: (id, parts) => splitExisting(api, apiCjs.internal, id, parts),
+    syncStatus: () => readSyncStatus(api, Date.now()),
+    runSync: async (accountId) => {
+      try {
+        await api.runBankSync(accountId ? { accountId } : undefined);
+        return { ok: true };
+      } catch (e) {
+        return { ok: false, error: String(e?.message ?? e) };
+      }
+    },
     close: () => api.shutdown(),
   };
 }

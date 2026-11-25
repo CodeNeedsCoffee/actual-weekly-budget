@@ -63,6 +63,21 @@ export function buildApp({ token, actual, splitRules = [], logger = false }) {
     return { category: cat.name, ...affordCheck({ amount, position }) };
   });
 
+  app.get('/sync/status', async () => ({ accounts: await actual.syncStatus() }));
+
+  // Runs the bank sync (all accounts, or one) and returns fresh status. One run at a time.
+  let syncing = false;
+  app.post('/sync', async (req, reply) => {
+    if (syncing) return reply.code(409).send({ error: 'sync already running' });
+    syncing = true;
+    try {
+      const result = await actual.runSync(req.body?.accountId);
+      return { ...result, accounts: await actual.syncStatus() };
+    } finally {
+      syncing = false;
+    }
+  });
+
   app.get('/categories', async () => ({ categories: await actual.listCategories() }));
 
   // Uncategorized inbox, newest first, each with an optional suggestion (never auto-applied).
