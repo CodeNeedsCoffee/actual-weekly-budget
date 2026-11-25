@@ -7,6 +7,7 @@ import 'package:weekly_budget/data/models.dart';
 void main() {
   inboxTests();
   syncTests();
+  forecastTests();
   test('health returns client version and sends bearer token', () async {
     final mock = MockClient((req) async {
       expect(req.headers['Authorization'], 'Bearer t');
@@ -81,5 +82,28 @@ void syncTests() {
     final r = await c.sync();
     expect(r.ok, isFalse);
     expect(r.error, 'bank unreachable');
+  });
+}
+
+void forecastTests() {
+  test('forecast and payoff parse', () async {
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((req) async {
+        if (req.url.path == '/forecast') {
+          return http.Response(
+              '{"status":"tight","startBalance":800000,"buffer":100000,"lowWithoutIncome":{"date":"2026-12-06","amount":90000},"lowWithIncome":{"date":"2026-12-06","amount":190000},"fix":{"moveFromSavings":10000,"before":"2026-12-06","stillShort":0},"path":[{"date":"2026-12-01","items":[{"name":"Rent","amount":-330000,"kind":"bill"}],"balanceWith":470000,"balanceWithout":470000}],"cardTotal":-1400,"warnings":[]}',
+              200);
+        }
+        return http.Response('{"card":"Card","cardOwed":500000,"safeNow":200000,"safeTotal":395000,"afterIncome":195000,"incomeLateDays":7}', 200);
+      }),
+    );
+    final f = await c.forecast();
+    expect(f.status, 'tight');
+    expect(f.moveFromSavings, 10000);
+    expect(f.path.single.items.single.name, 'Rent');
+    final p = await c.payoff();
+    expect(p!.safeNow, 200000);
   });
 }

@@ -8,3 +8,11 @@ Everything runs locally against a throwaway copy of a budget; no real server or 
 4. **App on the emulator:** `flutter build apk --debug`, install with `adb install -r`. In the app use the emulator's host-loopback alias (see the Android emulator networking docs) with the bridge port, and the bridge token.
 5. **Headless emulator notes:** `-no-window -gpu swangle_indirect` boots; start the app with `adb shell am start -n dev.weeklybudget.weekly_budget/.MainActivity --ez enable-software-rendering true --ez enable-impeller false` or the emulator crashes when Flutter renders. Stop the Gradle daemon (`android/gradlew --stop`) after building to free RAM.
 6. **Release builds:** plain-HTTP bridge addresses need a network security config before a release APK (M8).
+
+## Forecast and payoff configuration
+Set `FORECAST_CONFIG_FILE` to a JSON file (kept out of git; see `bridge/forecast-config.example.json`):
+- `checking`, `savings`, `payoffCard`: case-insensitive substrings of the account names.
+- `buffer` (cents), `variablePerDay` (everyday spending paid from Checking), `incomeLateDays` (default 7).
+- `items`: estimates for things Actual has no schedule for (paychecks, unscheduled bills): `{ name, amount (cents, + income / - bill), dayOfMonth: [..] }`.
+
+How it works: the 14-day forecast uses worst-case amounts for "approximately" and "between" schedules, and shows the low point with and without income. Card schedules are listed separately, since they hit Checking only when the card is paid. The payoff advisor uses the stated amounts, looks 21 days ahead, and reports `safeNow` (survives a paycheck up to `incomeLateDays` late) and `safeTotal` (if income arrives on time).
