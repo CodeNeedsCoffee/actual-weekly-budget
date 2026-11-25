@@ -32,3 +32,5 @@ key.properties
 google-services.json
 # OS
 .DS_Store
+split-rules*.json
+!split-rules.example.json

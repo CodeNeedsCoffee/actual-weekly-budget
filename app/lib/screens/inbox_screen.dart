@@ -43,6 +43,15 @@ class _InboxScreenState extends State<InboxScreen> {
     }
   }
 
+  Future<void> _split(InboxTransaction t) async {
+    try {
+      await widget.client.split(t.id, t.splitSuggestion!.parts);
+      setState(() => _items = _items!.where((x) => x.id != t.id).toList());
+    } on BridgeException catch (e) {
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.message)));
+    }
+  }
+
   Future<void> _pick(InboxTransaction t) async {
     final cats = _categories.where((c) => t.amount > 0 || !c.isIncome).toList();
     final chosen = await showModalBottomSheet<BudgetCategory>(
@@ -94,6 +103,15 @@ class _InboxScreenState extends State<InboxScreen> {
             Text(s.reason, style: Theme.of(context).textTheme.bodySmall),
           ],
           const SizedBox(height: 8),
+          if (t.splitSuggestion != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: FilledButton.tonalIcon(
+                onPressed: () => _split(t),
+                icon: const Icon(Icons.call_split),
+                label: Text(t.splitSuggestion!.label),
+              ),
+            ),
           Row(children: [
             if (s != null) FilledButton(onPressed: () => _assign(t, s.categoryId), child: Text(s.categoryName)),
             if (s != null) const SizedBox(width: 8),

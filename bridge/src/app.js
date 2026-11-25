@@ -4,6 +4,7 @@ import { weeklyPosition } from './weekly.js';
 import { affordCheck } from './afford.js';
 import { suggestCategory } from './suggest.js';
 import { splitActions } from './splits.js';
+import { splitSuggestionFor } from './split_rules.js';
 
 function tokenMatches(given, expected) {
   const a = Buffer.from(given ?? '');
@@ -12,7 +13,7 @@ function tokenMatches(given, expected) {
 }
 
 // `actual` is an adapter around @actual-app/api so routes can be tested with a fake.
-export function buildApp({ token, actual, logger = false }) {
+export function buildApp({ token, actual, splitRules = [], logger = false }) {
   const app = Fastify({ logger });
 
   app.addHook('onRequest', async (req, reply) => {
@@ -80,6 +81,7 @@ export function buildApp({ token, actual, logger = false }) {
         const name = s && names.get(s.categoryId);
         return {
           ...t,
+          splitSuggestion: t.amount < 0 ? splitSuggestionFor(t.payee, splitRules, cats) : null,
           suggestion: name
             ? {
                 categoryId: s.categoryId,

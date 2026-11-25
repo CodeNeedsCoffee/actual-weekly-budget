@@ -22,6 +22,22 @@ void main() {
 }
 
 void inboxTests() {
+  test('split posts the parts and maps 409 to a readable error', () async {
+    var status = 200;
+    final c = BridgeClient(
+      baseUrl: 'http://h:1',
+      token: 't',
+      client: MockClient((req) async {
+        expect(req.url.path, '/transactions/x/split');
+        expect(req.body, contains('"percent":50'));
+        return http.Response('{}', status);
+      }),
+    );
+    await c.split('x', [{'categoryId': 'a', 'percent': 50}, {'categoryId': 'b'}]);
+    status = 409;
+    expect(c.split('x', [{'categoryId': 'a', 'percent': 50}, {'categoryId': 'b'}]), throwsA(isA<BridgeException>()));
+  });
+
   test('uncategorized parses suggestions', () async {
     final c = BridgeClient(
       baseUrl: 'http://h:1',

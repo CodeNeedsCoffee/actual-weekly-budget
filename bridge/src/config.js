@@ -12,5 +12,6 @@ export function loadConfig(env = process.env) {
     actualPassword: need('ACTUAL_PASSWORD'),
     budgetId: need('ACTUAL_BUDGET_ID'),
     dataDir: env.DATA_DIR ?? './data',
+    splitRulesFile: env.SPLIT_RULES_FILE ?? '',
   };
 }

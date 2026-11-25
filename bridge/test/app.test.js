@@ -96,3 +96,15 @@ test('split validates parts and maps adapter errors', async () => {
   assert.equal((await post('gone', ok)).statusCode, 404);
   assert.equal((await post('done', ok)).statusCode, 409);
 });
+
+test('inbox offers a split suggestion when a split rule matches', async () => {
+  const withRules = buildApp({
+    token: 'tok1',
+    actual: fake,
+    splitRules: [{ match: 'unknown', parts: [{ category: 'Groceries', percent: 50 }, { category: 'Shopping' }] }],
+  });
+  const res = await withRules.inject({ method: 'GET', url: '/transactions/uncategorized', headers: auth });
+  const [a, b] = res.json().transactions;
+  assert.equal(a.splitSuggestion, null);
+  assert.deepEqual(b.splitSuggestion.parts, [{ categoryId: 'c1', percent: 50 }, { categoryId: 'c2' }]);
+});

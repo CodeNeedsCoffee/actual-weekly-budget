@@ -1,0 +1,3 @@
+[
+  { "match": "store", "parts": [{ "category": "Groceries", "percent": 50 }, { "category": "Household" }] }
+]
